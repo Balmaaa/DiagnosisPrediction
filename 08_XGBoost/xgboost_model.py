@@ -20,39 +20,23 @@ class XGBoostModel:
         self.feature_names = None
         self.best_params = None
         
-    def load_preprocessed_data(self):
-        """Load preprocessed data from previous pipeline"""
+    def load_unified_data(self):
+        """Load unified data for fair comparison"""
         
-        script_dir = Path(__file__).parent
+        # Import unified data preprocessing
+        import sys
+        sys.path.append(str(Path(__file__).parent.parent))
+        from unified_data_preprocessing import prepare_unified_data
         
-        # Load preprocessed features and targets
-        excel_x_path = script_dir.parent / "04_Preprocessing Pipeline" / "excel_preprocessed_features.csv"
-        excel_y_path = script_dir.parent / "04_Preprocessing Pipeline" / "excel_target.csv"
-        csv_x_path = script_dir.parent / "04_Preprocessing Pipeline" / "csv_preprocessed_features.csv"
-        csv_y_path = script_dir.parent / "04_Preprocessing Pipeline" / "csv_target.csv"
+        # Load unified data
+        X_train, X_test, y_train, y_test, feature_names, encoders, scalers = prepare_unified_data('CSV')
         
-        datasets = []
+        # Store encoders and scalers
+        self.categorical_encoders = encoders
+        self.numerical_scalers = scalers
+        self.feature_names = feature_names
         
-        # Load Excel dataset
-        if excel_x_path.exists() and excel_y_path.exists():
-            excel_X = pd.read_csv(excel_x_path)
-            excel_y = pd.read_csv(excel_y_path, header=None)
-            excel_y.columns = ['Diagnosis']
-            datasets.append(('Excel', excel_X, excel_y))
-            print(f"Loaded Excel dataset: {excel_X.shape}, Target: {excel_y.shape}")
-        
-        # Load CSV dataset
-        if csv_x_path.exists() and csv_y_path.exists():
-            csv_X = pd.read_csv(csv_x_path)
-            csv_y = pd.read_csv(csv_y_path, header=None)
-            csv_y.columns = ['Diagnosis']
-            datasets.append(('CSV', csv_X, csv_y))
-            print(f"Loaded CSV dataset: {csv_X.shape}, Target: {csv_y.shape}")
-        
-        if not datasets:
-            raise FileNotFoundError("No preprocessed datasets found. Run preprocessing pipeline first.")
-        
-        return datasets
+        return X_train, X_test, y_train, y_test
     
     def prepare_data(self, X, y):
         """Prepare data for XGBoost model"""
@@ -109,15 +93,13 @@ class XGBoostModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid
+        # Define parameter grid (reduced for faster fair comparison)
         param_grid = {
-            'n_estimators': [50, 100, 200],
-            'learning_rate': [0.01, 0.1, 0.2],
-            'max_depth': [3, 5, 7],
-            'min_child_weight': [1, 3, 5],
-            'subsample': [0.8, 0.9, 1.0],
-            'colsample_bytree': [0.8, 0.9, 1.0],
-            'gamma': [0, 0.1, 0.2]
+            'n_estimators': [50, 100],
+            'learning_rate': [0.1, 0.2],
+            'max_depth': [3, 5],
+            'min_child_weight': [1, 3],
+            'subsample': [0.8, 1.0]
         }
         
         # Create XGBoost classifier
@@ -381,84 +363,73 @@ def main():
     
     print("=" * 60)
     print("XGBOOST MODEL FOR PEDIATRIC APPENDICITIS PREDICTION")
+    print("[FAIR COMPARISON - UNIFIED DATA]")
     print("=" * 60)
     
     try:
         # Initialize XGBoost model
         xgb_model = XGBoostModel()
         
-        # Load preprocessed datasets
-        datasets = xgb_model.load_preprocessed_data()
+        # Load unified data (same as all other models)
+        print(f"\n{'='*60}")
+        print("LOADING UNIFIED DATA")
+        print(f"{'='*60}")
+        X_train, X_test, y_train, y_test = xgb_model.load_unified_data()
         
-        for dataset_name, X, y in datasets:
-            print(f"\n{'='*60}")
-            print(f"TRAINING {dataset_name.upper()} DATASET")
-            print(f"{'='*60}")
-            
-            # Prepare data
-            X_array, y_array, label_encoder = xgb_model.prepare_data(X, y)
-            xgb_model.label_encoder = label_encoder
-            
-            # Split data (60:40 as specified in paper)
-            X_train, X_test, y_train, y_test = xgb_model.split_data(X_array, y_array)
-            
-            # Train model
-            print(f"\nTraining XGBoost model...")
-            xgb_model.train_model(X_train, y_train, use_hyperparameter_tuning=True)
-            
-            # Evaluate model
-            print(f"\nEvaluating model...")
-            metrics, y_pred, y_pred_proba = xgb_model.evaluate_model(X_test, y_test)
-            
-            print(f"\n{'='*60}")
-            print(f"FINAL RESULTS - {dataset_name.upper()} DATASET")
-            print(f"{'='*60}")
-            print(f"Accuracy: {metrics['accuracy']:.4f}")
-            print(f"Precision: {metrics['precision']:.4f}")
-            print(f"Sensitivity (Recall): {metrics['sensitivity']:.4f}")
-            print(f"Specificity: {metrics['specificity']:.4f}")
-            print(f"PPV (Positive Predictive Value): {metrics['ppv']:.4f}")
-            print(f"NPV (Negative Predictive Value): {metrics['npv']:.4f}")
-            print(f"\nConfusion Matrix:")
-            print(f"  True Positives: {metrics['tp']}")
-            print(f"  True Negatives: {metrics['tn']}")
-            print(f"  False Positives: {metrics['fp']}")
-            print(f"  False Negatives: {metrics['fn']}")
-            
-            # Feature importance
-            feature_importance = xgb_model.get_feature_importance(top_n=10)
-            print(f"\nTop 10 Feature Importance:")
-            print(feature_importance.to_string(index=False))
-            
-            # Save results
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            results_file = f"xgboost_results_{dataset_name}_{timestamp}.pkl"
-            model_file = f"xgboost_model_{dataset_name}_{timestamp}.pkl"
-            feature_importance_file = f"xgboost_feature_importance_{dataset_name}_{timestamp}.png"
-            
-            # Save model and results
-            xgb_model.save_model(model_file)
-            
-            results = {
-                'dataset_name': dataset_name,
-                'model_type': 'XGBoost',
-                'best_params': xgb_model.best_params,
-                'final_metrics': metrics,
-                'feature_importance': feature_importance,
-                'timestamp': timestamp
-            }
-            
-            with open(results_file, 'wb') as f:
-                pickle.dump(results, f)
-            
-            # Generate plots
-            xgb_model.plot_feature_importance(top_n=15, save_path=feature_importance_file)
-            # xgb_model.plot_tree(tree_index=0, save_path=tree_plot_file)  # Disabled due to graphviz dependency
-            print(f"Tree plot skipped due to graphviz dependency")
-            
-            print(f"\nResults saved to: {results_file}")
-            print(f"Model saved to: {model_file}")
-            print(f"Feature importance plot saved to: {feature_importance_file}")
+        print(f"\n{'='*60}")
+        print(f"TRAINING XGBOOST MODEL")
+        print(f"{'='*60}")
+        
+        # Train model
+        xgb_model.train_model(X_train, y_train, use_hyperparameter_tuning=True)
+        
+        # Evaluate model
+        print(f"\nEvaluating model...")
+        metrics, y_pred, y_pred_proba = xgb_model.evaluate_model(X_test, y_test)
+        
+        print(f"\n{'='*60}")
+        print(f"FINAL RESULTS")
+        print(f"{'='*60}")
+        print(f"Accuracy: {metrics['accuracy']:.4f}")
+        print(f"Precision: {metrics['precision']:.4f}")
+        print(f"Sensitivity (Recall): {metrics['sensitivity']:.4f}")
+        print(f"Specificity: {metrics['specificity']:.4f}")
+        print(f"PPV (Positive Predictive Value): {metrics['ppv']:.4f}")
+        print(f"NPV (Negative Predictive Value): {metrics['npv']:.4f}")
+        print(f"\nConfusion Matrix:")
+        print(f"  True Positives: {metrics['tp']}")
+        print(f"  True Negatives: {metrics['tn']}")
+        print(f"  False Positives: {metrics['fp']}")
+        print(f"  False Negatives: {metrics['fn']}")
+        
+        # Feature importance
+        feature_importance = xgb_model.get_feature_importance(top_n=10)
+        print(f"\nTop 10 Feature Importance:")
+        print(feature_importance.to_string(index=False))
+        
+        # Save results
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_file = f"xgboost_results_fair_{timestamp}.pkl"
+        model_file = f"xgboost_model_fair_{timestamp}.pkl"
+        
+        # Save model and results
+        xgb_model.save_model(model_file)
+        
+        results = {
+            'dataset_name': 'CSV',
+            'model_type': 'XGBoost',
+            'data_type': 'unified_30_features',
+            'best_params': xgb_model.best_params,
+            'final_metrics': metrics,
+            'feature_importance': feature_importance,
+            'timestamp': timestamp
+        }
+        
+        with open(results_file, 'wb') as f:
+            pickle.dump(results, f)
+        
+        print(f"\nResults saved to: {results_file}")
+        print(f"Model saved to: {model_file}")
         
         print(f"\n{'='*60}")
         print("XGBOOST MODEL TRAINING COMPLETED")

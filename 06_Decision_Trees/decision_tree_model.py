@@ -21,39 +21,23 @@ class DecisionTreeModel:
         self.feature_names = None
         self.best_params = None
         
-    def load_preprocessed_data(self):
-        """Load preprocessed data from previous pipeline"""
+    def load_unified_data(self):
+        """Load unified data for fair comparison"""
         
-        script_dir = Path(__file__).parent
+        # Import unified data preprocessing
+        import sys
+        sys.path.append(str(Path(__file__).parent.parent))
+        from unified_data_preprocessing import prepare_unified_data
         
-        # Load preprocessed features and targets
-        excel_x_path = script_dir.parent / "04_Preprocessing Pipeline" / "excel_preprocessed_features.csv"
-        excel_y_path = script_dir.parent / "04_Preprocessing Pipeline" / "excel_target.csv"
-        csv_x_path = script_dir.parent / "04_Preprocessing Pipeline" / "csv_preprocessed_features.csv"
-        csv_y_path = script_dir.parent / "04_Preprocessing Pipeline" / "csv_target.csv"
+        # Load unified data
+        X_train, X_test, y_train, y_test, feature_names, encoders, scalers = prepare_unified_data('CSV')
         
-        datasets = []
+        # Store encoders and scalers
+        self.categorical_encoders = encoders
+        self.numerical_scalers = scalers
+        self.feature_names = feature_names
         
-        # Load Excel dataset
-        if excel_x_path.exists() and excel_y_path.exists():
-            excel_X = pd.read_csv(excel_x_path)
-            excel_y = pd.read_csv(excel_y_path, header=None)
-            excel_y.columns = ['Diagnosis']
-            datasets.append(('Excel', excel_X, excel_y))
-            print(f"Loaded Excel dataset: {excel_X.shape}, Target: {excel_y.shape}")
-        
-        # Load CSV dataset
-        if csv_x_path.exists() and csv_y_path.exists():
-            csv_X = pd.read_csv(csv_x_path)
-            csv_y = pd.read_csv(csv_y_path, header=None)
-            csv_y.columns = ['Diagnosis']
-            datasets.append(('CSV', csv_X, csv_y))
-            print(f"Loaded CSV dataset: {csv_X.shape}, Target: {csv_y.shape}")
-        
-        if not datasets:
-            raise FileNotFoundError("No preprocessed datasets found. Run preprocessing pipeline first.")
-        
-        return datasets
+        return X_train, X_test, y_train, y_test
     
     def prepare_data(self, X, y):
         """Prepare data for Decision Tree model"""
@@ -316,81 +300,73 @@ def main():
     
     print("=" * 60)
     print("DECISION TREE MODEL FOR PEDIATRIC APPENDICITIS PREDICTION")
+    print("[FAIR COMPARISON - UNIFIED DATA]")
     print("=" * 60)
     
     try:
         # Initialize Decision Tree model
         dt_model = DecisionTreeModel()
         
-        # Load preprocessed datasets
-        datasets = dt_model.load_preprocessed_data()
+        # Load unified data (same as all other models)
+        print(f"\n{'='*60}")
+        print("LOADING UNIFIED DATA")
+        print(f"{'='*60}")
+        X_train, X_test, y_train, y_test = dt_model.load_unified_data()
         
-        for dataset_name, X, y in datasets:
-            print(f"\n{'='*60}")
-            print(f"TRAINING {dataset_name.upper()} DATASET")
-            print(f"{'='*60}")
-            
-            # Prepare data
-            X_array, y_array, label_encoder = dt_model.prepare_data(X, y)
-            dt_model.label_encoder = label_encoder
-            
-            # Split data (60:40 as specified in paper)
-            X_train, X_test, y_train, y_test = dt_model.split_data(X_array, y_array)
-            
-            # Train model
-            print(f"\nTraining Decision Tree model...")
-            dt_model.train_model(X_train, y_train, use_hyperparameter_tuning=True)
-            
-            # Evaluate model
-            print(f"\nEvaluating model...")
-            metrics, y_pred, y_pred_proba = dt_model.evaluate_model(X_test, y_test)
-            
-            print(f"\n{'='*60}")
-            print(f"FINAL RESULTS - {dataset_name.upper()} DATASET")
-            print(f"{'='*60}")
-            print(f"Accuracy: {metrics['accuracy']:.4f}")
-            print(f"Precision: {metrics['precision']:.4f}")
-            print(f"Sensitivity (Recall): {metrics['sensitivity']:.4f}")
-            print(f"Specificity: {metrics['specificity']:.4f}")
-            print(f"PPV (Positive Predictive Value): {metrics['ppv']:.4f}")
-            print(f"NPV (Negative Predictive Value): {metrics['npv']:.4f}")
-            print(f"\nConfusion Matrix:")
-            print(f"  True Positives: {metrics['tp']}")
-            print(f"  True Negatives: {metrics['tn']}")
-            print(f"  False Positives: {metrics['fp']}")
-            print(f"  False Negatives: {metrics['fn']}")
-            
-            # Feature importance
-            feature_importance = dt_model.get_feature_importance(top_n=10)
-            print(f"\nTop 10 Feature Importance:")
-            print(feature_importance.to_string(index=False))
-            
-            # Save results
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            results_file = f"decision_tree_results_{dataset_name}_{timestamp}.pkl"
-            model_file = f"decision_tree_model_{dataset_name}_{timestamp}.pkl"
-            
-            # Save model and results
-            dt_model.save_model(model_file)
-            
-            results = {
-                'dataset_name': dataset_name,
-                'model_type': 'Decision Tree',
-                'best_params': dt_model.best_params,
-                'final_metrics': metrics,
-                'feature_importance': feature_importance,
-                'timestamp': timestamp
-            }
-            
-            with open(results_file, 'wb') as f:
-                pickle.dump(results, f)
-            
-            # Visualize tree (disabled due to feature index issue)
-            # dt_model.visualize_tree(max_depth=3, save_path=tree_plot_file)
-            print(f"Tree visualization skipped due to feature index limitations")
-            
-            print(f"\nResults saved to: {results_file}")
-            print(f"Model saved to: {model_file}")
+        print(f"\n{'='*60}")
+        print(f"TRAINING DECISION TREE MODEL")
+        print(f"{'='*60}")
+        
+        # Train model
+        dt_model.train_model(X_train, y_train, use_hyperparameter_tuning=True)
+        
+        # Evaluate model
+        print(f"\nEvaluating model...")
+        metrics, y_pred, y_pred_proba = dt_model.evaluate_model(X_test, y_test)
+        
+        print(f"\n{'='*60}")
+        print(f"FINAL RESULTS")
+        print(f"{'='*60}")
+        print(f"Accuracy: {metrics['accuracy']:.4f}")
+        print(f"Precision: {metrics['precision']:.4f}")
+        print(f"Sensitivity (Recall): {metrics['sensitivity']:.4f}")
+        print(f"Specificity: {metrics['specificity']:.4f}")
+        print(f"PPV (Positive Predictive Value): {metrics['ppv']:.4f}")
+        print(f"NPV (Negative Predictive Value): {metrics['npv']:.4f}")
+        print(f"\nConfusion Matrix:")
+        print(f"  True Positives: {metrics['tp']}")
+        print(f"  True Negatives: {metrics['tn']}")
+        print(f"  False Positives: {metrics['fp']}")
+        print(f"  False Negatives: {metrics['fn']}")
+        
+        # Feature importance
+        feature_importance = dt_model.get_feature_importance(top_n=10)
+        print(f"\nTop 10 Feature Importance:")
+        print(feature_importance.to_string(index=False))
+        
+        # Save results
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_file = f"decision_tree_results_fair_{timestamp}.pkl"
+        model_file = f"decision_tree_model_fair_{timestamp}.pkl"
+        
+        # Save model and results
+        dt_model.save_model(model_file)
+        
+        results = {
+            'dataset_name': 'CSV',
+            'model_type': 'Decision Tree',
+            'data_type': 'unified_30_features',
+            'best_params': dt_model.best_params,
+            'final_metrics': metrics,
+            'feature_importance': feature_importance,
+            'timestamp': timestamp
+        }
+        
+        with open(results_file, 'wb') as f:
+            pickle.dump(results, f)
+        
+        print(f"\nResults saved to: {results_file}")
+        print(f"Model saved to: {model_file}")
         
         print(f"\n{'='*60}")
         print("DECISION TREE MODEL TRAINING COMPLETED")
