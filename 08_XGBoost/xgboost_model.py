@@ -93,26 +93,36 @@ class XGBoostModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid (reduced for faster fair comparison)
+        # Calculate scale_pos_weight for class imbalance
+        from collections import Counter
+        counter = Counter(y_train)
+        scale_pos_weight = counter[0] / counter[1]  # majority / minority
+        
+        print(f"Class distribution: {dict(counter)}")
+        print(f"scale_pos_weight: {scale_pos_weight:.2f}")
+        
+        # Define parameter grid - CHANGED: Stronger models
         param_grid = {
-            'n_estimators': [50, 100],
-            'learning_rate': [0.1, 0.2],
-            'max_depth': [3, 5],
+            'n_estimators': [100, 200],
+            'learning_rate': [0.05, 0.1],
+            'max_depth': [5, 7, 9],
             'min_child_weight': [1, 3],
-            'subsample': [0.8, 1.0]
+            'subsample': [0.8, 0.9],
+            'colsample_bytree': [0.8, 1.0]
         }
         
-        # Create XGBoost classifier
+        # Create XGBoost classifier - ADDED: scale_pos_weight
         xgb_model = xgb.XGBClassifier(
             objective='binary:logistic',
             eval_metric='logloss',
             random_state=42,
-            use_label_encoder=False
+            use_label_encoder=False,
+            scale_pos_weight=scale_pos_weight
         )
         
-        # Perform Grid Search
+        # Perform Grid Search - CHANGED: Use f1 scoring
         grid_search = GridSearchCV(
-            xgb_model, param_grid, cv=5, scoring='accuracy', n_jobs=-1, verbose=1
+            xgb_model, param_grid, cv=5, scoring='f1', n_jobs=-1, verbose=1
         )
         
         grid_search.fit(X_train, y_train)
@@ -128,22 +138,28 @@ class XGBoostModel:
     def train_model(self, X_train, y_train, use_hyperparameter_tuning=True):
         """Train XGBoost model"""
         
+        # Calculate scale_pos_weight for class imbalance
+        from collections import Counter
+        counter = Counter(y_train)
+        scale_pos_weight = counter[0] / counter[1]
+        
         if use_hyperparameter_tuning:
             self.model = self.hyperparameter_tuning(X_train, y_train)
         else:
-            # Use default parameters
+            # Use default parameters - ADDED: scale_pos_weight
             self.model = xgb.XGBClassifier(
-                n_estimators=100,
-                learning_rate=0.1,
-                max_depth=6,
+                n_estimators=150,
+                learning_rate=0.05,
+                max_depth=7,
                 min_child_weight=1,
-                subsample=1.0,
-                colsample_bytree=1.0,
-                gamma=0,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                gamma=0.1,
                 objective='binary:logistic',
                 eval_metric='logloss',
                 random_state=42,
-                use_label_encoder=False
+                use_label_encoder=False,
+                scale_pos_weight=scale_pos_weight
             )
             self.model.fit(X_train, y_train)
         
@@ -153,12 +169,14 @@ class XGBoostModel:
         
         return self.model
     
-    def evaluate_model(self, X_test, y_test):
-        """Evaluate XGBoost model"""
+    def evaluate_model(self, X_test, y_test, threshold=0.5):
+        """Evaluate XGBoost model with optional threshold adjustment"""
         
-        # Make predictions
-        y_pred = self.model.predict(X_test)
+        # Get predicted probabilities
         y_pred_proba = self.model.predict_proba(X_test)[:, 1]
+        
+        # Apply custom threshold for better sensitivity (default 0.5, can be lowered to 0.3-0.4)
+        y_pred = (y_pred_proba >= threshold).astype(int)
         
         # Calculate metrics
         accuracy = accuracy_score(y_test, y_pred)

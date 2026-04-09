@@ -93,21 +93,22 @@ class GradientBoostingModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid (reduced for faster fair comparison)
+        # Define parameter grid - CHANGED: Stronger models to capture minority patterns
         param_grid = {
-            'n_estimators': [50, 100],
-            'learning_rate': [0.1, 0.2],
-            'max_depth': [3, 5],
+            'n_estimators': [100, 200],
+            'learning_rate': [0.05, 0.1],
+            'max_depth': [5, 7, 9],
             'min_samples_split': [2, 5],
-            'min_samples_leaf': [1, 2]
+            'min_samples_leaf': [1, 2],
+            'subsample': [0.8, 1.0]
         }
         
         # Create Gradient Boosting classifier
         gb = GradientBoostingClassifier(random_state=42)
         
-        # Perform Grid Search
+        # Perform Grid Search - CHANGED: Use f1 scoring
         grid_search = GridSearchCV(
-            gb, param_grid, cv=5, scoring='accuracy', n_jobs=-1, verbose=1
+            gb, param_grid, cv=5, scoring='f1', n_jobs=-1, verbose=1
         )
         
         grid_search.fit(X_train, y_train)
@@ -144,12 +145,14 @@ class GradientBoostingModel:
         
         return self.model
     
-    def evaluate_model(self, X_test, y_test):
-        """Evaluate Gradient Boosting model"""
+    def evaluate_model(self, X_test, y_test, threshold=0.5):
+        """Evaluate Gradient Boosting model with optional threshold adjustment"""
         
-        # Make predictions
-        y_pred = self.model.predict(X_test)
+        # Get predicted probabilities
         y_pred_proba = self.model.predict_proba(X_test)[:, 1]
+        
+        # Apply custom threshold for better sensitivity (default 0.5, can be lowered to 0.3-0.4)
+        y_pred = (y_pred_proba >= threshold).astype(int)
         
         # Calculate metrics
         accuracy = accuracy_score(y_test, y_pred)

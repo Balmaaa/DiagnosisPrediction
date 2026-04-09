@@ -94,21 +94,22 @@ class DecisionTreeModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid
+        # Define parameter grid - ADDED: class_weight to handle imbalance
         param_grid = {
             'criterion': ['gini', 'entropy'],
-            'max_depth': [3, 5, 7, 10, 15, None],
-            'min_samples_split': [2, 5, 10, 20],
-            'min_samples_leaf': [1, 2, 4, 8],
-            'max_features': ['sqrt', 'log2', None]
+            'max_depth': [5, 7, 10, 15, None],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['sqrt', 'log2', None],
+            'class_weight': ['balanced', None]
         }
         
         # Create Decision Tree classifier
         dt = DecisionTreeClassifier(random_state=42)
         
-        # Perform Grid Search
+        # Perform Grid Search - CHANGED: scoring='f1' to balance precision/recall
         grid_search = GridSearchCV(
-            dt, param_grid, cv=5, scoring='accuracy', n_jobs=-1, verbose=1
+            dt, param_grid, cv=5, scoring='f1', n_jobs=-1, verbose=1
         )
         
         grid_search.fit(X_train, y_train)
@@ -127,12 +128,13 @@ class DecisionTreeModel:
         if use_hyperparameter_tuning:
             self.model = self.hyperparameter_tuning(X_train, y_train)
         else:
-            # Use default parameters
+            # Use default parameters - ADDED: class_weight='balanced'
             self.model = DecisionTreeClassifier(
                 criterion='gini',
                 max_depth=10,
-                min_samples_split=10,
-                min_samples_leaf=4,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                class_weight='balanced',
                 random_state=42
             )
             self.model.fit(X_train, y_train)
@@ -143,12 +145,14 @@ class DecisionTreeModel:
         
         return self.model
     
-    def evaluate_model(self, X_test, y_test):
-        """Evaluate Decision Tree model"""
+    def evaluate_model(self, X_test, y_test, threshold=0.5):
+        """Evaluate Decision Tree model with optional threshold adjustment"""
         
-        # Make predictions
-        y_pred = self.model.predict(X_test)
+        # Get predicted probabilities
         y_pred_proba = self.model.predict_proba(X_test)[:, 1]
+        
+        # Apply custom threshold for better sensitivity (default 0.5, can be lowered to 0.3-0.4)
+        y_pred = (y_pred_proba >= threshold).astype(int)
         
         # Calculate metrics
         accuracy = accuracy_score(y_test, y_pred)
