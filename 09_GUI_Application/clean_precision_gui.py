@@ -21,6 +21,9 @@ class CleanPrecisionGUI:
         # Initialize real AI predictor
         self.predictor = AppendicitisPredictor()
         
+        # Prediction counter for periodic metrics refresh
+        self.prediction_count = 0
+        
         # Create main layout
         self.create_widgets()
         
@@ -677,6 +680,34 @@ Always consider complete clinical context and patient history in medical decisio
 
 ============================================================
 """
+        
+        # Add real-time metrics (refresh every 5 predictions)
+        self.prediction_count += 1
+        
+        if self.prediction_count % 5 == 0:  # Only refresh metrics every 5 predictions
+            try:
+                metrics = self.predictor.get_realtime_metrics()
+                
+                metrics_text = "\n=== REAL-TIME MODEL PERFORMANCE (Updated) ===\n\n"
+                
+                for model, m in metrics.items():
+                    if "error" in m:
+                        metrics_text += f"{model}: ERROR - {m['error']}\n"
+                        continue
+                    
+                    metrics_text += (
+                        f"{model}\n"
+                        f"  Precision: {m['precision']:.4f}\n"
+                        f"  Sensitivity: {m['sensitivity']:.4f}\n"
+                        f"  Specificity: {m['specificity']:.4f}\n\n"
+                    )
+                
+                results += metrics_text
+                
+            except Exception as e:
+                results += f"\n=== REAL-TIME METRICS ERROR ===\n{str(e)}\n"
+        else:
+            results += f"\n=== REAL-TIME METRICS ===\n(Updated every 5 predictions - Current: {self.prediction_count})\n"
         
         return results
     
