@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import random
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix, classification_report
@@ -11,10 +12,16 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
+# Set random seed for reproducibility
+SEED = 42
+np.random.seed(SEED)
+random.seed(SEED)
+
 class GradientBoostingModel:
     """Gradient Boosting model for appendicitis prediction"""
     
     def __init__(self):
+        print("USING UPDATED GRADIENT BOOSTING MODEL")
         self.model = None
         self.label_encoder = None
         self.feature_names = None
@@ -25,7 +32,11 @@ class GradientBoostingModel:
         
         # Import unified data preprocessing
         import sys
-        sys.path.append(str(Path(__file__).parent.parent))
+        import os
+        # Add project root to path
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
         from unified_data_preprocessing import prepare_unified_data
         
         # Load unified data
@@ -93,18 +104,18 @@ class GradientBoostingModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid - CHANGED: Stronger models to capture minority patterns
+        # Define parameter grid - EXPANDED for better tuning effectiveness
         param_grid = {
-            'n_estimators': [100, 200],
-            'learning_rate': [0.05, 0.1],
-            'max_depth': [5, 7, 9],
-            'min_samples_split': [2, 5],
-            'min_samples_leaf': [1, 2],
-            'subsample': [0.8, 1.0]
+            'n_estimators': [100, 200, 300, 500],
+            'learning_rate': [0.01, 0.05, 0.1, 0.2],
+            'max_depth': [3, 5, 7, 10],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'subsample': [0.6, 0.8, 1.0]
         }
         
-        # Create Gradient Boosting classifier
-        gb = GradientBoostingClassifier(random_state=42)
+        # Create Gradient Boosting classifier with fixed seed
+        gb = GradientBoostingClassifier(random_state=SEED)
         
         # Perform Grid Search - CHANGED: Use f1 scoring
         grid_search = GridSearchCV(
@@ -116,8 +127,43 @@ class GradientBoostingModel:
         self.best_params = grid_search.best_params_
         self.model = grid_search.best_estimator_
         
+        # TUNING EFFECTIVENESS DIAGNOSTICS
+        print(f"\n{'='*60}")
+        print("TUNING EFFECTIVENESS ANALYSIS")
+        print(f"{'='*60}")
         print(f"Best parameters: {self.best_params}")
-        print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
+        print(f"Best CV score: {grid_search.best_score_:.4f}")
+        
+        # Check if best params differ significantly from defaults
+        default_n_est = 100
+        default_lr = 0.1
+        default_depth = 3
+        best_n_est = self.best_params.get('n_estimators', default_n_est)
+        best_lr = self.best_params.get('learning_rate', default_lr)
+        best_depth = self.best_params.get('max_depth', default_depth)
+        
+        params_differ = (best_n_est != default_n_est or 
+                        best_lr != default_lr or 
+                        best_depth != default_depth)
+        
+        print(f"\nParameter Impact Analysis:")
+        print(f"  - n_estimators: {best_n_est} (default: {default_n_est})")
+        print(f"  - learning_rate: {best_lr} (default: {default_lr})")
+        print(f"  - max_depth: {best_depth} (default: {default_depth})")
+        print(f"  - Parameters differ from default: {params_differ}")
+        
+        # Show all CV results summary
+        cv_results = grid_search.cv_results_
+        mean_scores = cv_results['mean_test_score']
+        print(f"  - Score range: {mean_scores.min():.4f} to {mean_scores.max():.4f}")
+        print(f"  - Score std: {mean_scores.std():.4f}")
+        
+        if mean_scores.std() < 0.01:
+            print(f"  ⚠️  WARNING: Low score variance - tuning may be ineffective")
+            print(f"  ⚠️  Suggests: Dataset bottleneck or model limitation")
+        else:
+            print(f"  ✅ Score variance healthy - tuning is effective")
+        print(f"{'='*60}\n")
         
         return self.model
     
@@ -127,7 +173,7 @@ class GradientBoostingModel:
         if use_hyperparameter_tuning:
             self.model = self.hyperparameter_tuning(X_train, y_train)
         else:
-            # Use default parameters
+            # Use default parameters with SEED for reproducibility
             self.model = GradientBoostingClassifier(
                 n_estimators=100,
                 learning_rate=0.1,
@@ -135,7 +181,7 @@ class GradientBoostingModel:
                 min_samples_split=2,
                 min_samples_leaf=1,
                 subsample=1.0,
-                random_state=42
+                random_state=SEED
             )
             self.model.fit(X_train, y_train)
         
@@ -348,6 +394,20 @@ def main():
         
         # Train model
         gb_model.train_model(X_train, y_train, use_hyperparameter_tuning=True)
+        
+        # DEBUG: Verify tuned parameters are actually used
+        print(f"\n{'='*60}")
+        print("MODEL PARAMETER VERIFICATION")
+        print(f"{'='*60}")
+        if gb_model.best_params:
+            print(f"Best parameters from tuning: {gb_model.best_params}")
+            print(f"Model is using tuned parameters: {gb_model.model.get_params()['n_estimators'] != 100}")
+        else:
+            print("WARNING: No tuned parameters found - using defaults!")
+        print(f"Final Model Parameters: n_estimators={gb_model.model.get_params()['n_estimators']}, "
+              f"learning_rate={gb_model.model.get_params()['learning_rate']:.4f}, "
+              f"max_depth={gb_model.model.get_params()['max_depth']}")
+        print(f"{'='*60}")
         
         # Evaluate model
         print(f"\nEvaluating model...")

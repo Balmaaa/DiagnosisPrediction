@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
+import random
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
 from sklearn.model_selection import ParameterGrid, KFold
@@ -14,6 +15,17 @@ import warnings
 warnings.filterwarnings('ignore')
 from itertools import product
 import json
+
+# Set random seed for reproducibility
+SEED = 42
+np.random.seed(SEED)
+random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 class AppendicitisDataset(Dataset):
     """Custom dataset for appendicitis prediction"""
@@ -277,7 +289,7 @@ class HyperparameterTuner:
     def _cross_validate(self, X_dict, y, model_params, training_params, cv_folds):
         """Perform cross-validation with given parameters"""
         
-        kf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        kf = KFold(n_splits=cv_folds, shuffle=True, random_state=SEED)
         cv_scores = []
         
         for fold, (train_idx, val_idx) in enumerate(kf.split(y)):
@@ -763,7 +775,11 @@ def load_preprocessed_data():
     """Load preprocessed data from unified preprocessing module"""
     
     import sys
-    sys.path.append(str(Path(__file__).parent.parent))
+    import os
+    # Add project root to path
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from unified_data_preprocessing import prepare_unified_data
     
     # Load unified data (same as all baseline models)
@@ -806,7 +822,7 @@ def prepare_data_for_transformer(X, y):
     
     return X_clean, y_encoded, label_encoder
 
-def split_data(X, y, test_size=0.4, random_state=42):
+def split_data(X, y, test_size=0.4, random_state=SEED):
     """Split data into training and testing sets (60:40 ratio as per paper)"""
     
     from sklearn.model_selection import train_test_split
@@ -857,7 +873,10 @@ def main():
             
             # Separate numerical and categorical features
             import sys
-            sys.path.append(str(Path(__file__).parent.parent))
+            import os
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
             from unified_data_preprocessing import NUMERICAL_FEATURES, CATEGORICAL_FEATURES
             
             # Numerical features
@@ -1040,7 +1059,7 @@ def main():
         import traceback
         traceback.print_exc()
 
-def split_data_for_dict(X_dict, y, test_size=0.4, random_state=42):
+def split_data_for_dict(X_dict, y, test_size=0.4, random_state=SEED):
     """Split dictionary data into training and testing sets"""
     
     from sklearn.model_selection import train_test_split

@@ -132,11 +132,11 @@ KEY METRICS:
 - False Positive Rate: FP/(FP+TN) - How often healthy patients are incorrectly flagged
 - False Negative Rate: FN/(FN+TP) - How often appendicitis cases are missed
 
-BEST MODELS FOR PRECISION/SPECIFICITY:
-- Transformer: Highest Precision (75.6%) & Specificity (79.5%)
-- Decision Tree: High Specificity (76.4%) & Good Precision (73.9%)
-- Gradient Boosting: Balanced Precision (74.3%) & Specificity (71.7%)
-- XGBoost: Balanced Performance (75.1% Precision, 71.7% Specificity)
+BEST MODELS FOR PRECISION/SPECIFICITY (FAIR COMPARISON - 30 FEATURES):
+- Transformer: Highest Accuracy (86.26%) & Specificity (96.39%)
+- XGBoost: High Accuracy (85.30%) & Specificity (95.36%)
+- Decision Tree: Good Accuracy (84.98%) & Specificity (91.75%)
+- Gradient Boosting: Balanced Accuracy (84.98%) & Specificity (94.33%)
 
 CLINICAL APPLICATION:
 - High Precision: Fewer false positives - reduces unnecessary surgeries
@@ -334,6 +334,51 @@ This system is for medical reference and decision support only. Clinical judgmen
         for field_name, var in self.lab_vars.items():
             input_data[field_name] = var.get()
         
+        # Preprocess categorical values to numeric
+        input_data = self._preprocess_input_data(input_data)
+        
+        return input_data
+    
+    def _preprocess_input_data(self, input_data):
+        """Convert categorical values to numeric for model compatibility"""
+        
+        # Convert Sex to numeric (Male=0, Female=1)
+        if 'Sex' in input_data:
+            if input_data['Sex'] == 'Male':
+                input_data['Sex'] = 0
+            elif input_data['Sex'] == 'Female':
+                input_data['Sex'] = 1
+            else:
+                input_data['Sex'] = 0  # Default to Male
+        
+        # Convert Yes/No symptoms to numeric (No=0, Yes=1)
+        yes_no_fields = [
+            'Lower_Right_Abd_Pain', 'Migratory_Pain', 'Loss_of_Appetite', 'Nausea',
+            'Coughing_Pain', 'Dysuria', 'Stool', 'Peritonitis',
+            'Contralateral_Rebound_Tenderness', 'Ipsilateral_Rebound_Tenderness',
+            'Psoas_Sign', 'Neutrophilia', 'Ketones_in_Urine', 'RBC_in_Urine', 'WBC_in_Urine'
+        ]
+        
+        for field in yes_no_fields:
+            if field in input_data:
+                if input_data[field] == 'Yes':
+                    input_data[field] = 1
+                elif input_data[field] == 'No':
+                    input_data[field] = 0
+                else:
+                    input_data[field] = 0  # Default to No
+        
+        # Convert Severity to numeric (Mild=0, Moderate=1, Severe=2)
+        if 'Severity' in input_data:
+            if input_data['Severity'] == 'Mild':
+                input_data['Severity'] = 0
+            elif input_data['Severity'] == 'Moderate':
+                input_data['Severity'] = 1
+            elif input_data['Severity'] == 'Severe':
+                input_data['Severity'] = 2
+            else:
+                input_data['Severity'] = 0  # Default to Mild
+        
         return input_data
     
     def validate_input(self, input_data):
@@ -396,16 +441,42 @@ This system is for medical reference and decision support only. Clinical judgmen
             import time
             time.sleep(1.0)
             
-            # Get selected model
-            model_name = self.model_var.get()
-            
-            # Use real AI predictor
-            prediction, prediction_proba = self.predictor.predict(model_name, input_data)
-            
-            # Format comprehensive results
-            diagnosis = "Appendicitis" if prediction == 1 else "No Appendicitis"
-            confidence = prediction_proba[prediction]
-            
+            try:
+                # Check if predictor is initialized
+                if self.predictor is None or not hasattr(self.predictor, 'predict'):
+                    raise ValueError("Predictor not initialized. Please restart the application.")
+                
+                # Get selected model
+                model_name = self.model_var.get()
+                
+                # Get input data
+                input_data = self.collect_input_data()
+                
+                # Make prediction
+                result = self.predictor.predict(model_name, input_data)
+                
+                # Validate result
+                if result is None:
+                    raise ValueError("Prediction returned None")
+                
+                prediction, prediction_proba = result
+                
+                # Format comprehensive results
+                diagnosis = "Appendicitis" if prediction == 1 else "No Appendicitis"
+                confidence = prediction_proba[prediction]
+                
+                # Calculate risk score for display
+                risk_score = self._calculate_risk_score(input_data)
+                
+                results = self._format_real_model_results(input_data, model_name, diagnosis, confidence, risk_score, prediction_proba)
+                
+                # Update results display
+                self.root.after(0, self._display_results, results)
+                
+            except Exception as e:
+                error_msg = f"Prediction error: {e}"
+                self.root.after(0, self._display_error, error_msg)
+        
             # Calculate risk score for display
             risk_score = self._calculate_risk_score(input_data)
             

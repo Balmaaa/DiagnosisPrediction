@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import random
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix, classification_report
@@ -12,10 +13,16 @@ from sklearn.tree import plot_tree
 import warnings
 warnings.filterwarnings('ignore')
 
+# Set random seed for reproducibility
+SEED = 42
+np.random.seed(SEED)
+random.seed(SEED)
+
 class DecisionTreeModel:
     """Decision Tree model for appendicitis prediction"""
     
     def __init__(self):
+        print("USING UPDATED DECISION TREE MODEL")
         self.model = None
         self.label_encoder = None
         self.feature_names = None
@@ -26,7 +33,11 @@ class DecisionTreeModel:
         
         # Import unified data preprocessing
         import sys
-        sys.path.append(str(Path(__file__).parent.parent))
+        import os
+        # Add project root to path
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
         from unified_data_preprocessing import prepare_unified_data
         
         # Load unified data
@@ -94,18 +105,18 @@ class DecisionTreeModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid - ADDED: class_weight to handle imbalance
+        # Define parameter grid - EXPANDED for better tuning effectiveness
         param_grid = {
             'criterion': ['gini', 'entropy'],
-            'max_depth': [5, 7, 10, 15, None],
-            'min_samples_split': [2, 5, 10],
-            'min_samples_leaf': [1, 2, 4],
+            'max_depth': [None, 3, 5, 7, 10, 15, 20, 30],
+            'min_samples_split': [2, 5, 10, 20],
+            'min_samples_leaf': [1, 2, 4, 8],
             'max_features': ['sqrt', 'log2', None],
-            'class_weight': ['balanced', None]
+            'class_weight': ['balanced', 'balanced_subsample', None]
         }
         
-        # Create Decision Tree classifier
-        dt = DecisionTreeClassifier(random_state=42)
+        # Create Decision Tree classifier with fixed seed
+        dt = DecisionTreeClassifier(random_state=SEED)
         
         # Perform Grid Search - CHANGED: scoring='f1' to balance precision/recall
         grid_search = GridSearchCV(
@@ -117,8 +128,34 @@ class DecisionTreeModel:
         self.best_params = grid_search.best_params_
         self.model = grid_search.best_estimator_
         
+        # TUNING EFFECTIVENESS DIAGNOSTICS
+        print(f"\n{'='*60}")
+        print("TUNING EFFECTIVENESS ANALYSIS")
+        print(f"{'='*60}")
         print(f"Best parameters: {self.best_params}")
-        print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
+        print(f"Best CV score: {grid_search.best_score_:.4f}")
+        
+        # Check if best params differ significantly from defaults
+        default_depth = 3
+        best_depth = self.best_params.get('max_depth', default_depth)
+        depth_differs = best_depth != default_depth if best_depth is not None else True
+        
+        print(f"\nParameter Impact Analysis:")
+        print(f"  - max_depth: {best_depth} (default would be ~{default_depth})")
+        print(f"  - Parameters differ from default: {depth_differs}")
+        
+        # Show all CV results summary
+        cv_results = grid_search.cv_results_
+        mean_scores = cv_results['mean_test_score']
+        print(f"  - Score range: {mean_scores.min():.4f} to {mean_scores.max():.4f}")
+        print(f"  - Score std: {mean_scores.std():.4f}")
+        
+        if mean_scores.std() < 0.01:
+            print(f"  ⚠️  WARNING: Low score variance - tuning may be ineffective")
+            print(f"  ⚠️  Suggests: Dataset bottleneck or parameter space too narrow")
+        else:
+            print(f"  ✅ Score variance healthy - tuning is effective")
+        print(f"{'='*60}\n")
         
         return self.model
     
@@ -128,14 +165,14 @@ class DecisionTreeModel:
         if use_hyperparameter_tuning:
             self.model = self.hyperparameter_tuning(X_train, y_train)
         else:
-            # Use default parameters - ADDED: class_weight='balanced'
+            # Use default parameters - ADDED: class_weight='balanced', SEED for reproducibility
             self.model = DecisionTreeClassifier(
                 criterion='gini',
                 max_depth=10,
                 min_samples_split=5,
                 min_samples_leaf=2,
                 class_weight='balanced',
-                random_state=42
+                random_state=SEED
             )
             self.model.fit(X_train, y_train)
         
@@ -323,6 +360,20 @@ def main():
         
         # Train model
         dt_model.train_model(X_train, y_train, use_hyperparameter_tuning=True)
+        
+        # DEBUG: Verify tuned parameters are actually used
+        print(f"\n{'='*60}")
+        print("MODEL PARAMETER VERIFICATION")
+        print(f"{'='*60}")
+        if dt_model.best_params:
+            print(f"Best parameters from tuning: {dt_model.best_params}")
+            print(f"Model is using tuned parameters: {dt_model.model.get_params()['max_depth'] != 3}")
+        else:
+            print("WARNING: No tuned parameters found - using defaults!")
+        print(f"Final Model Parameters: max_depth={dt_model.model.get_params()['max_depth']}, "
+              f"min_samples_split={dt_model.model.get_params()['min_samples_split']}, "
+              f"min_samples_leaf={dt_model.model.get_params()['min_samples_leaf']}")
+        print(f"{'='*60}")
         
         # Evaluate model
         print(f"\nEvaluating model...")
