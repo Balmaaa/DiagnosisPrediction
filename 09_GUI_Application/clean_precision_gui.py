@@ -515,12 +515,12 @@ PATIENT DATA SUMMARY:
 ==================================================
 
 DEMOGRAPHIC INFORMATION:
-• Age: {input_data.get('Age', 'N/A')} years
-• Weight: {input_data.get('Weight', 'N/A')} kg
-• Height: {input_data.get('Height', 'N/A')} cm
-• BMI: {input_data.get('BMI', 'N/A')}
-• Sex: {input_data.get('Sex', 'N/A')}
-• Neutrophil %: {input_data.get('Neutrophil_Percentage', 'N/A')}%
+• Age: {input_data.get('Age', 0)} years
+• Weight: {input_data.get('Weight', 0)} kg
+• Height: {input_data.get('Height', 0)} cm
+• BMI: {input_data.get('BMI', 0)}
+• Sex: {input_data.get('Sex', 0)}
+• Neutrophil %: {input_data.get('Neutrophil_Percentage', 0)}%
 
 CLINICAL SYMPTOMS:
 • Body Temperature: {input_data.get('Body_Temperature', 'N/A')}C
@@ -538,17 +538,17 @@ CLINICAL SYMPTOMS:
 • Psoas Sign: {input_data.get('Psoas_Sign', 'N/A')}
 
 LABORATORY RESULTS:
-• WBC Count: {input_data.get('WBC_Count', 'N/A')} x10^9/L
-• RBC Count: {input_data.get('RBC_Count', 'N/A')} x10^12/L
-• Hemoglobin: {input_data.get('Hemoglobin', 'N/A')} g/dL
-• RDW: {input_data.get('RDW', 'N/A')}%
-• Segmented Neutrophils: {input_data.get('Segmented_Neutrophils', 'N/A')}%
-• Thrombocyte Count: {input_data.get('Thrombocyte_Count', 'N/A')} x10^9/L
-• CRP: {input_data.get('CRP', 'N/A')} mg/L
-• Neutrophilia: {input_data.get('Neutrophilia', 'N/A')}
-• Ketones in Urine: {input_data.get('Ketones_in_Urine', 'N/A')}
-• RBC in Urine: {input_data.get('RBC_in_Urine', 'N/A')}
-• WBC in Urine: {input_data.get('WBC_in_Urine', 'N/A')}
+• WBC Count: {input_data.get('WBC_Count', 0)} x10^9/L
+• RBC Count: {input_data.get('RBC_Count', 0)} x10^12/L
+• Hemoglobin: {input_data.get('Hemoglobin', 0)} g/dL
+• RDW: {input_data.get('RDW', 0)}%
+• Segmented Neutrophils: {input_data.get('Segmented_Neutrophils', 0)}%
+• Thrombocyte Count: {input_data.get('Thrombocyte_Count', 0)} x10^9/L
+• CRP: {input_data.get('CRP', 0)} mg/L
+• Neutrophilia: {input_data.get('Neutrophilia', 0)}
+• Ketones in Urine: {input_data.get('Ketones_in_Urine', 0)}
+• RBC in Urine: {input_data.get('RBC_in_Urine', 0)}
+• WBC in Urine: {input_data.get('WBC_in_Urine', 0)}
 
 MODEL ANALYSIS:
 ==================================================
@@ -770,16 +770,34 @@ Always consider complete clinical context and patient history in medical decisio
         self.predict_button.config(state="normal")
     
     def fill_precision_test(self):
-        """Fill form with high precision test case (clear negative case)"""
-        # This case should test precision - clear negative case
-        self.demo_vars['Age'].set(8)
-        self.demo_vars['Weight'].set(28)
-        self.demo_vars['Height'].set(128)
-        self.demo_vars['BMI'].set(17.1)
-        self.demo_vars['Sex'].set('Female')
-        self.demo_vars['Neutrophil_Percentage'].set(55)
+        """Fill form with dynamic high precision test case (clear negative case)"""
+        import random
         
-        self.clinical_vars['Body_Temperature'].set(37.0)
+        # Generate realistic low-risk appendicitis case
+        # Age: Younger children have lower appendicitis rates
+        age = random.randint(5, 10)
+        
+        # Weight/Height: Normal BMI range
+        height = random.randint(110, 140)
+        weight = round(random.uniform(20, 35), 1)
+        bmi = round(weight / (height/100)**2, 1)
+        
+        # Sex: Slightly higher appendicitis in males
+        sex = random.choice(['Male', 'Female'])
+        
+        # Normal clinical values (low risk)
+        temp = round(random.uniform(36.5, 37.2), 1)
+        neutro_pct = random.randint(45, 60)
+        
+        # Set form values
+        self.demo_vars['Age'].set(age)
+        self.demo_vars['Weight'].set(weight)
+        self.demo_vars['Height'].set(height)
+        self.demo_vars['BMI'].set(bmi)
+        self.demo_vars['Sex'].set(sex)
+        self.demo_vars['Neutrophil_Percentage'].set(neutro_pct)
+        
+        self.clinical_vars['Body_Temperature'].set(temp)
         self.clinical_vars['Lower_Right_Abd_Pain'].set('no')
         self.clinical_vars['Migratory_Pain'].set('no')
         self.clinical_vars['Loss_of_Appetite'].set('no')
@@ -789,66 +807,106 @@ Always consider complete clinical context and patient history in medical decisio
         self.clinical_vars['Ipsilateral_Rebound_Tenderness'].set('no')
         self.clinical_vars['Psoas_Sign'].set('no')
         
-        self.lab_vars['WBC_Count'].set(7.8)
-        self.lab_vars['CRP'].set(3)
+        # Normal lab values (low risk)
+        self.lab_vars['WBC_Count'].set(round(random.uniform(6, 9), 1))
+        self.lab_vars['CRP'].set(random.randint(1, 5))
         self.lab_vars['Neutrophilia'].set('no')
-        self.lab_vars['Segmented_Neutrophils'].set(52)
+        self.lab_vars['Segmented_Neutrophils'].set(random.randint(45, 60))
         
-        self.status_var.set("High precision test case loaded (clear negative)")
+        self.status_var.set(f"Dynamic precision test case loaded (Age {age}, Temp {temp}°C)")
     
     def fill_specificity_test(self):
-        """Fill form with high specificity test case (clear appendicitis case)"""
-        # This case should test specificity - clear positive case
-        self.demo_vars['Age'].set(12)
-        self.demo_vars['Weight'].set(45)
-        self.demo_vars['Height'].set(152)
-        self.demo_vars['BMI'].set(19.5)
-        self.demo_vars['Sex'].set('Male')
-        self.demo_vars['Neutrophil_Percentage'].set(75)
+        """Fill form with dynamic high specificity test case (clear appendicitis case)"""
+        import random
         
-        self.clinical_vars['Body_Temperature'].set(38.5)
+        # Generate realistic high-risk appendicitis case
+        # Age: Peak appendicitis incidence around 10-14 years
+        age = random.randint(10, 16)
+        
+        # Weight/Height: Normal to slightly elevated BMI
+        height = random.randint(140, 170)
+        weight = round(random.uniform(35, 65), 1)
+        bmi = round(weight / (height/100)**2, 1)
+        
+        # Sex: Higher appendicitis in males
+        sex = random.choice(['Male', 'Male', 'Female'])  # Weighted toward male
+        
+        # High-risk clinical values
+        temp = round(random.uniform(38.0, 39.2), 1)
+        neutro_pct = random.randint(70, 85)
+        
+        # Set form values
+        self.demo_vars['Age'].set(age)
+        self.demo_vars['Weight'].set(weight)
+        self.demo_vars['Height'].set(height)
+        self.demo_vars['BMI'].set(bmi)
+        self.demo_vars['Sex'].set(sex)
+        self.demo_vars['Neutrophil_Percentage'].set(neutro_pct)
+        
+        self.clinical_vars['Body_Temperature'].set(temp)
         self.clinical_vars['Lower_Right_Abd_Pain'].set('yes')
-        self.clinical_vars['Migratory_Pain'].set('yes')
+        self.clinical_vars['Migratory_Pain'].set(random.choice(['yes', 'no']))
         self.clinical_vars['Loss_of_Appetite'].set('yes')
         self.clinical_vars['Nausea'].set('yes')
-        self.clinical_vars['Peritonitis'].set('yes')
-        self.clinical_vars['Severity'].set('complicated')
+        self.clinical_vars['Peritonitis'].set(random.choice(['yes', 'no']))
+        self.clinical_vars['Severity'].set(random.choice(['complicated', 'uncomplicated']))
         self.clinical_vars['Ipsilateral_Rebound_Tenderness'].set('yes')
-        self.clinical_vars['Psoas_Sign'].set('yes')
+        self.clinical_vars['Psoas_Sign'].set(random.choice(['yes', 'no']))
         
-        self.lab_vars['WBC_Count'].set(16.5)
-        self.lab_vars['CRP'].set(48)
+        # Elevated lab values (high risk)
+        self.lab_vars['WBC_Count'].set(round(random.uniform(14, 20), 1))
+        self.lab_vars['CRP'].set(random.randint(30, 80))
         self.lab_vars['Neutrophilia'].set('yes')
-        self.lab_vars['Segmented_Neutrophils'].set(78)
+        self.lab_vars['Segmented_Neutrophils'].set(random.randint(75, 90))
         
-        self.status_var.set("High specificity test case loaded (clear positive)")
+        self.status_var.set(f"Dynamic specificity test case loaded (Age {age}, Temp {temp}°C, WBC {self.lab_vars['WBC_Count'].get()})")
     
     def fill_balanced_test(self):
-        """Fill form with balanced test case (borderline case)"""
-        # This case should test both precision and specificity
-        self.demo_vars['Age'].set(14)
-        self.demo_vars['Weight'].set(52)
-        self.demo_vars['Height'].set(165)
-        self.demo_vars['BMI'].set(19.1)
-        self.demo_vars['Sex'].set('Male')
-        self.demo_vars['Neutrophil_Percentage'].set(65)
+        """Fill form with dynamic balanced test case (borderline case)"""
+        import random
         
-        self.clinical_vars['Body_Temperature'].set(37.6)
-        self.clinical_vars['Lower_Right_Abd_Pain'].set('yes')
-        self.clinical_vars['Migratory_Pain'].set('no')
-        self.clinical_vars['Loss_of_Appetite'].set('yes')
-        self.clinical_vars['Nausea'].set('yes')
+        # Generate realistic borderline appendicitis case
+        # Age: Mixed risk across age ranges
+        age = random.randint(8, 15)
+        
+        # Weight/Height: Variable BMI
+        height = random.randint(120, 160)
+        weight = round(random.uniform(25, 55), 1)
+        bmi = round(weight / (height/100)**2, 1)
+        
+        # Sex: Equal probability
+        sex = random.choice(['Male', 'Female'])
+        
+        # Borderline clinical values
+        temp = round(random.uniform(37.3, 38.2), 1)
+        neutro_pct = random.randint(60, 75)
+        
+        # Set form values
+        self.demo_vars['Age'].set(age)
+        self.demo_vars['Weight'].set(weight)
+        self.demo_vars['Height'].set(height)
+        self.demo_vars['BMI'].set(bmi)
+        self.demo_vars['Sex'].set(sex)
+        self.demo_vars['Neutrophil_Percentage'].set(neutro_pct)
+        
+        # Mixed clinical presentation (borderline)
+        self.clinical_vars['Body_Temperature'].set(temp)
+        self.clinical_vars['Lower_Right_Abd_Pain'].set(random.choice(['yes', 'no']))
+        self.clinical_vars['Migratory_Pain'].set(random.choice(['yes', 'no']))
+        self.clinical_vars['Loss_of_Appetite'].set(random.choice(['yes', 'no']))
+        self.clinical_vars['Nausea'].set(random.choice(['yes', 'no']))
         self.clinical_vars['Peritonitis'].set('no')
         self.clinical_vars['Severity'].set('uncomplicated')
-        self.clinical_vars['Ipsilateral_Rebound_Tenderness'].set('no')
+        self.clinical_vars['Ipsilateral_Rebound_Tenderness'].set(random.choice(['yes', 'no']))
         self.clinical_vars['Psoas_Sign'].set('no')
         
-        self.lab_vars['WBC_Count'].set(11.2)
-        self.lab_vars['CRP'].set(12)
-        self.lab_vars['Neutrophilia'].set('no')
-        self.lab_vars['Segmented_Neutrophils'].set(65)
+        # Borderline lab values
+        self.lab_vars['WBC_Count'].set(round(random.uniform(10, 14), 1))
+        self.lab_vars['CRP'].set(random.randint(8, 25))
+        self.lab_vars['Neutrophilia'].set(random.choice(['yes', 'no']))
+        self.lab_vars['Segmented_Neutrophils'].set(random.randint(60, 75))
         
-        self.status_var.set("Balanced precision/specificity test case loaded")
+        self.status_var.set(f"Dynamic balanced test case loaded (Age {age}, Temp {temp}°C, Borderline)")
     
     def clear_form(self):
         """Clear all form fields"""

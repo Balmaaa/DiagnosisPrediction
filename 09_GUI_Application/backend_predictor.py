@@ -483,6 +483,9 @@ class AppendicitisPredictor:
                     # Use label encoding for simplicity
                     le = LabelEncoder()
                     X_processed[col] = le.fit_transform(X_processed[col].astype(str))
+                elif X_processed[col].dtype in ['int64', 'float64']:
+                    # Skip encoding for already numeric values (from GUI preprocessing)
+                    pass
             
             # Handle missing values
             for col in X_processed.columns:
