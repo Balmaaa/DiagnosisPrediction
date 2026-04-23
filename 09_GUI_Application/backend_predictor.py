@@ -673,8 +673,10 @@ class AppendicitisPredictor:
             
             # Handle different model types
             if hasattr(model, 'predict_proba'):
-                prediction = model.predict(processed_data)
                 prediction_proba = model.predict_proba(processed_data)
+                # Apply decision threshold (0.5 - standard default)
+                decision_threshold = 0.5
+                prediction = (prediction_proba[:, 1] >= decision_threshold).astype(int)
                 # Handle numpy arrays by extracting scalar value
                 if hasattr(prediction, '__len__') and len(prediction) == 1:
                     pred_val = prediction.item() if hasattr(prediction, 'item') else float(prediction[0])
@@ -682,6 +684,7 @@ class AppendicitisPredictor:
                     pred_val = float(prediction) if not hasattr(prediction, '__len__') else prediction
                 proba_val = prediction_proba[0].tolist() if prediction_proba is not None else None
                 print(f"[OK] Prediction complete: {pred_val}, proba shape: {prediction_proba.shape}")
+                print(f"[THRESHOLD] Using decision threshold: {decision_threshold}")
                 return pred_val, proba_val
             else:
                 prediction = model.predict(processed_data)
@@ -924,26 +927,32 @@ class AppendicitisPredictor:
             self.models = {}
             return False
 
+    def predict_with_threshold(self, model, X, threshold=0.4):
+        """Unified prediction method with consistent threshold"""
+        proba = model.predict_proba(X)
+        return (proba[:, 1] >= threshold).astype(int)
+    
     def get_realtime_metrics(self):
-        """Calculate real-time precision, sensitivity, and specificity for all models"""
+        """Get real-time performance metrics for all loaded models"""
         from sklearn.metrics import precision_score, recall_score, confusion_matrix
         
         results = {}
         
-        # Check if test data is available
+        # Check if we have test data
         if self.X_test is None or self.y_test is None:
             return {"error": "Test data not available"}
         
+        # Calculate metrics for each model
         for name, model in self.models.items():
             try:
-                # Get predictions on test data
-                y_pred = model.predict(self.X_test)
+                # Make predictions with consistent threshold
+                y_pred = self.predict_with_threshold(model, self.X_test, threshold=0.5)
                 
                 # Calculate metrics
                 precision = precision_score(self.y_test, y_pred, pos_label=1)
                 sensitivity = recall_score(self.y_test, y_pred, pos_label=1)
                 
-                # Calculate specificity from confusion matrix
+                # Calculate specificity
                 tn, fp, fn, tp = confusion_matrix(self.y_test, y_pred).ravel()
                 specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
                 

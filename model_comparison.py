@@ -1,77 +1,116 @@
 import pandas as pd
 import numpy as np
-import pickle
+import joblib
 from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.metrics import precision_score, recall_score, confusion_matrix, accuracy_score
+import sys
+import os
+
+# Add paths to model directories
+sys.path.append('06_Decision_Trees')
+sys.path.append('07_Gradient_Boosting')
+sys.path.append('08_XGBoost')
 
 class ModelComparison:
-    """Compare performance of all models for appendicitis prediction"""
+    """Compare performance of all models for appendicitis prediction using live models"""
     
     def __init__(self):
-        self.models_data = {}
+        self.models = {}
         self.comparison_metrics = {}
         
-    def load_model_results(self):
-        """Load results from all model folders"""
+    def load_models(self):
+        """Load trained models from .pkl files"""
         
-        base_path = Path(__file__).parent
+        base_path = Path(__file__).parent / "09_GUI_Application" / "saved_models"
         
-        # Model folders
-        model_folders = {
-            'Transformer': base_path / "05_Transformer_Model",
-            'Decision Tree': base_path / "06_Decision_Trees", 
-            'Gradient Boosting': base_path / "07_Gradient_Boosting",
-            'XGBoost': base_path / "08_XGBoost"
+        # Model files
+        model_files = {
+            'Decision Tree': base_path / "Decision_Tree.pkl",
+            'Gradient Boosting': base_path / "Gradient_Boosting.pkl", 
+            'XGBoost': base_path / "XGBoost.pkl",
+            'Transformer': base_path / "Transformer.pkl"
         }
         
-        for model_name, folder_path in model_folders.items():
-            print(f"Loading results for {model_name}...")
+        for model_name, model_path in model_files.items():
+            print(f"Loading {model_name}...")
             
-            # Find all result files
-            result_files = list(folder_path.glob("*results*.pkl"))
-            
-            if not result_files:
-                print(f"No results found for {model_name}")
-                continue
-                
-            # Load the most recent result file
-            latest_file = max(result_files, key=lambda x: x.stat().st_mtime)
-            
-            try:
-                with open(latest_file, 'rb') as f:
-                    results = pickle.load(f)
-                
-                self.models_data[model_name] = results
-                print(f"Loaded {model_name} results from {latest_file.name}")
-                
-            except Exception as e:
-                print(f"Error loading {model_name} results: {e}")
+            if model_path.exists():
+                try:
+                    self.models[model_name] = joblib.load(model_path)
+                    print(f"Loaded {model_name} from {model_path.name}")
+                except Exception as e:
+                    print(f"Error loading {model_name}: {e}")
+            else:
+                print(f"Model file not found: {model_path}")
+    
+    def load_test_data(self):
+        """Load the same test data used by backend_predictor"""
+        
+        # Use the same data loading as backend_predictor
+        sys.path.append('06_Decision_Trees')
+        from decision_tree_model import DecisionTreeModel
+        
+        dt_wrapper = DecisionTreeModel()
+        X_train, X_test, y_train, y_test = dt_wrapper.load_unified_data()
+        
+        return X_test, y_test
     
     def create_comparison_table(self):
-        """Create comparison table of all models"""
+        """Create comparison table using live model evaluation with 0.4 threshold"""
+        
+        if not self.models:
+            self.load_models()
+        
+        # Load test data
+        X_test, y_test = self.load_test_data()
         
         comparison_data = []
         
-        for model_name, results in self.models_data.items():
-            if 'final_metrics' in results:
-                metrics = results['final_metrics']
+        for model_name, model in self.models.items():
+            print(f"Evaluating {model_name}...")
+            
+            try:
+                # Get predicted probabilities
+                y_proba = model.predict_proba(X_test)
+                
+                # Apply 0.5 threshold (standard default)
+                y_pred = (y_proba[:, 1] >= 0.5).astype(int)
+                
+                # Calculate metrics
+                accuracy = accuracy_score(y_test, y_pred)
+                precision = precision_score(y_test, y_pred, pos_label=1)
+                sensitivity = recall_score(y_test, y_pred, pos_label=1)
+                
+                # Calculate specificity
+                tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+                
+                # Calculate PPV and NPV
+                ppv = tp / (tp + fp) if (tp + fp) > 0 else 0
+                npv = tn / (tn + fn) if (tn + fn) > 0 else 0
                 
                 comparison_data.append({
                     'Model': model_name,
-                    'Dataset': results.get('dataset_name', 'Unknown'),
-                    'Accuracy': metrics.get('accuracy', 0),
-                    'Precision': metrics.get('precision', 0),
-                    'Sensitivity': metrics.get('sensitivity', 0),
-                    'Specificity': metrics.get('specificity', 0),
-                    'PPV': metrics.get('ppv', 0),
-                    'NPV': metrics.get('npv', 0),
-                    'True Positives': metrics.get('tp', 0),
-                    'True Negatives': metrics.get('tn', 0),
-                    'False Positives': metrics.get('fp', 0),
-                    'False Negatives': metrics.get('fn', 0)
+                    'Dataset': 'CSV',
+                    'Accuracy': accuracy,
+                    'Precision': precision,
+                    'Sensitivity': sensitivity,
+                    'Specificity': specificity,
+                    'PPV': ppv,
+                    'NPV': npv,
+                    'True Positives': tp,
+                    'True Negatives': tn,
+                    'False Positives': fp,
+                    'False Negatives': fn
                 })
+                
+                print(f"  Accuracy: {accuracy:.4f}, Sensitivity: {sensitivity:.4f}, Specificity: {specificity:.4f}")
+                
+            except Exception as e:
+                print(f"Error evaluating {model_name}: {e}")
         
         self.comparison_df = pd.DataFrame(comparison_data)
         return self.comparison_df
@@ -287,25 +326,20 @@ class ModelComparison:
         }
 
 def main():
-    """Main function for model comparison"""
+    """Main function for model comparison using live models"""
     
-    print("="*60)
+    print("="*80)
     print("MODEL COMPARISON FOR PEDIATRIC APPENDICITIS PREDICTION")
-    print("="*60)
+    print("LIVE MODEL EVALUATION (threshold = 0.5)")
+    print("="*80)
     
     try:
         # Initialize comparison
         comparison = ModelComparison()
         
-        # Load all model results
-        comparison.load_model_results()
-        
-        # Create and display comparison table
+        # Load models and evaluate live
         comparison.create_comparison_table()
         comparison.print_comparison_table()
-        
-        # Analyze feature importance
-        comparison.analyze_feature_importance()
         
         # Generate plots
         comparison.plot_model_comparison()
@@ -317,9 +351,9 @@ def main():
         # Save all results
         saved_files = comparison.save_comparison_results()
         
-        print(f"\n{'='*60}")
+        print(f"\n{'='*80}")
         print("MODEL COMPARISON COMPLETED")
-        print(f"{'='*60}")
+        print(f"{'='*80}")
         print("Files saved:")
         for file_type, file_path in saved_files.items():
             print(f"  {file_type}: {file_path}")

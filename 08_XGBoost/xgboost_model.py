@@ -216,7 +216,7 @@ class XGBoostModel:
         
         return self.model
     
-    def evaluate_model(self, X_test, y_test, threshold=0.5):
+    def evaluate(self, X_test, y_test, threshold=0.4):
         """Evaluate XGBoost model with optional threshold adjustment"""
         
         # Get predicted probabilities
