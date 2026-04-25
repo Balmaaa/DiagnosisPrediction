@@ -26,6 +26,17 @@ This project develops an AI-based diagnosis prediction model for pediatric appen
 - **Comprehensive Evaluation**: Model comparison with medical statistics metrics
 - **Data Preprocessing**: Automated pipeline for data cleaning and preparation
 
+## Medical Interpretation
+- Sensitivity (True Positive Rate): Ability to correctly identify appendicitis cases
+- Specificity (True Negative Rate): Ability to correctly identify non-appendicitis cases
+- PPV (Positive Predictive Value): Probability that positive prediction is correct
+- NPV (Negative Predictive Value): Probability that negative prediction is correct
+
+## Recommendations
+- For screening (high sensitivity needed): Transformer (77.20%)
+- For confirmation (high specificity needed): XGBoost (95.36%)
+- Consider ensemble approach for balanced performance
+
 ## Key Components
 
 ### 1. Backend Predictor (`backend_predictor.py`)
@@ -55,12 +66,12 @@ This project develops an AI-based diagnosis prediction model for pediatric appen
 ## Model Performance
 
 ### Latest Models (April 25, 2026)
-| Model | Accuracy | Precision | Sensitivity | Specificity | Best Use Case |
-|--------|----------|-----------|-------------|-------------|---------------|
-| **XGBoost** | 85.30% | 98.68% | 77.20% | 71.43% | Overall screening |
-| **Decision Tree** | 84.98% | 92.22% | 69.75% | 96.39% | High specificity |
-| **Gradient Boosting** | 84.98% | 92.22% | 69.75% | 96.39% | Balanced performance |
-| **Transformer** | 77.00% | 98.68% | 77.20% | 71.43% | Complex patterns |
+| Model | Accuracy | Sensitivity | Specificity | PPV | NPV | Best Use Case |
+|--------|----------|-----------|-------------|------|------|---------------|
+| **XGBoost** | 85.30% | 68.91% | 95.36% | 90.11% | 83.33% | High specificity |
+| **Decision Tree** | 84.98% | 73.95% | 91.75% | 84.62% | 85.17% | Balanced performance |
+| **Gradient Boosting** | 84.98% | 69.75% | 94.33% | 88.30% | 83.56% | High PPV |
+| **Transformer** | 77.00% | 77.20% | 71.43% | 98.68% | 10.20% | High sensitivity |
 
 ### Transformer Model Evolution
 - **April 4**: 96.4% specificity (CrossEntropyLoss)
