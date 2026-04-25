@@ -18,7 +18,6 @@ class ModelComparison:
         
         base_path = Path(__file__).parent
         
-        # Model folders
         model_folders = {
             'Transformer': base_path / "05_Transformer_Model",
             'Decision Tree': base_path / "06_Decision_Trees", 
@@ -29,7 +28,6 @@ class ModelComparison:
         for model_name, folder_path in model_folders.items():
             print(f"Loading results for {model_name}...")
             
-            # Find all result files
             result_files = list(folder_path.glob("*results*.pkl"))
             
             if not result_files:

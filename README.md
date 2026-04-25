@@ -33,10 +33,11 @@ This project develops an AI-based diagnosis prediction model for pediatric appen
 - Handles data preprocessing
 - Provides prediction interface
 
-### 2. GUI Application (`simple_gui.py`)
+### 2. GUI Application (`prediction_gui.py`)
 - Interactive form for patient data input
-- Real-time AI predictions
+- Real-time AI predictions with 4 model options
 - Medical interpretation of results
+- Features: scroll wheel support, temperature scaling for Transformer
 
 ### 3. Model Training Scripts
 - Individual training scripts for each model type
@@ -52,10 +53,19 @@ This project develops an AI-based diagnosis prediction model for pediatric appen
 - Suspected acute appendicitis cases
 
 ## Model Performance
-- **Accuracy**: Up to 86%
-- **Precision**: Up to 91%
-- **Recall**: Up to 75%
-- **F1-Score**: Up to 82%
+
+### Latest Models (April 25, 2026)
+| Model | Accuracy | Precision | Sensitivity | Specificity | Best Use Case |
+|--------|----------|-----------|-------------|-------------|---------------|
+| **XGBoost** | 85.30% | 98.68% | 77.20% | 71.43% | Overall screening |
+| **Decision Tree** | 84.98% | 92.22% | 69.75% | 96.39% | High specificity |
+| **Gradient Boosting** | 84.98% | 92.22% | 69.75% | 96.39% | Balanced performance |
+| **Transformer** | 77.00% | 98.68% | 77.20% | 71.43% | Complex patterns |
+
+### Transformer Model Evolution
+- **April 4**: 96.4% specificity (CrossEntropyLoss)
+- **April 25**: 71.4% specificity (BCEWithLogitsLoss with pos_weight)
+- **Trade-off**: Improved sensitivity (69.8% → 77.2%) at cost of specificity
 
 ## Installation & Setup
 
@@ -73,7 +83,7 @@ This project develops an AI-based diagnosis prediction model for pediatric appen
 ### Running the Application
 ```bash
 cd 09_GUI_Application
-python simple_gui.py
+python prediction_gui.py
 ```
 
 ## Usage
@@ -102,6 +112,15 @@ python simple_gui.py
 - **Confidence**: Prediction probability (0-1)
 - **Risk Assessment**: Clinical interpretation
 
+### Transformer Architecture (Latest)
+- **Embedding Dimension**: 128
+- **Layers**: 6
+- **Attention Heads**: 4 (GUI) / 8 (checkpoint)
+- **Loss Function**: BCEWithLogitsLoss with pos_weight
+- **Temperature Scaling**: 1.0788 (probability calibration)
+- **Features**: 30 clinical + 8 missing indicators = 38 total
+- **Normalization**: StandardScaler on numerical features
+
 ## Evaluation Metrics
 - Accuracy, Precision, Sensitivity (Recall)
 - Specificity, PPV, NPV
@@ -111,6 +130,39 @@ python simple_gui.py
 - AI predictions supplement, not replace, clinical judgment
 - Data privacy and confidentiality maintained
 - Model limitations clearly communicated
+
+## Model File Locations
+
+### Latest Models (April 25, 2026)
+```
+09_GUI_Application/saved_models/
+├── Decision_Tree.pkl
+├── Gradient_Boosting.pkl  
+├── XGBoost.pkl
+├── Transformer.pt (with temperature scaling)
+└── metadata.pkl
+```
+
+### Historical Models (April 4, 2026)
+```
+06_Decision_Trees/decision_tree_model_fair_20260404_193942.pkl
+07_Gradient_Boosting/gradient_boosting_model_fair_20260404_194743.pkl
+08_XGBoost/xgboost_model_fair_20260404_195216.pkl
+05_Transformer_Model/best_advanced_transformer_model.pth
+```
+
+## Recent Changes (April 2026)
+
+### Transformer Model Updates
+1. **Loss Function**: CrossEntropyLoss → BCEWithLogitsLoss with pos_weight
+2. **Architecture**: Increased embed_dim (64→128), layers (4→6)
+3. **Features**: Added temperature scaling for probability calibration
+4. **Performance**: Improved sensitivity (69.8%→77.2%) at cost of specificity (96.4%→71.4%)
+
+### GUI Improvements
+1. **Consolidated Models**: All models now in `saved_models/` directory
+2. **Enhanced UX**: Scroll wheel support, improved layout
+3. **Updated Files**: Replaced old GUI files with optimized `prediction_gui.py`
 
 ## Future Improvements
 - Enhanced Transformer architecture

@@ -11,7 +11,6 @@ from sklearn.impute import SimpleImputer
 import warnings
 warnings.filterwarnings('ignore')
 
-# Feature definitions
 NUMERICAL_FEATURES = [
     'Age', 'Weight', 'Height', 'BMI', 'Body_Temperature', 'WBC_Count',
     'RBC_Count', 'Hemoglobin', 'RDW', 'Segmented_Neutrophils', 'Thrombocyte_Count',
@@ -25,7 +24,6 @@ CATEGORICAL_FEATURES = [
     'Psoas_Sign', 'Neutrophilia', 'Ketones_in_Urine', 'RBC_in_Urine', 'WBC_in_Urine'
 ]
 
-# Laboratory features for missing indicators
 LABORATORY_FEATURES = [
     'WBC_Count', 'RBC_Count', 'Hemoglobin', 'RDW', 'Segmented_Neutrophils',
     'Thrombocyte_Count', 'CRP', 'Neutrophil_Percentage'

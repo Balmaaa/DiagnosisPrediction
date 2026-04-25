@@ -12,7 +12,6 @@ import os
 import warnings
 warnings.filterwarnings('ignore')
 
-# Input validation constants for clinical safety
 NON_NEGATIVE_FIELDS = [
     "Age", "Weight", "Height", "BMI",
     "WBC_Count", "RBC_Count", "Hemoglobin",

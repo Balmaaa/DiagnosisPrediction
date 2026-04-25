@@ -16,7 +16,6 @@ warnings.filterwarnings('ignore')
 from itertools import product
 import json
 
-# Set random seed for reproducibility
 SEED = 42
 np.random.seed(SEED)
 random.seed(SEED)
@@ -49,11 +48,9 @@ class FeatureEmbedding(nn.Module):
         self.feature_info = feature_info
         self.embed_dim = embed_dim
         
-        # Separate embeddings for numerical and categorical features
         numerical_features = [f for f, info in feature_info.items() if info['type'] == 'numerical']
         categorical_features = [f for f, info in feature_info.items() if info['type'] == 'categorical']
         
-        # Numerical feature embeddings (each feature separately)
         self.numerical_embeddings = nn.ModuleDict({
             feat: nn.Linear(1, embed_dim)  # Each numerical feature gets its own embedding
             for feat in numerical_features

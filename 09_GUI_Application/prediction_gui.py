@@ -8,7 +8,6 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-# --- Transformer Architecture (needed to load .pt) ---
 
 class FeatureEmbedding(nn.Module):
     def __init__(self, feature_info, embed_dim=64):
@@ -79,7 +78,6 @@ class AdvancedTabularTransformer(nn.Module):
         x_pooled = torch.mean(x, dim=1)
         return self.classifier(x_pooled)
 
-# --- Feature Definitions ---
 
 NUMERICAL_FEATURES = [
     'Age', 'Weight', 'Height', 'BMI', 'Body_Temperature', 'WBC_Count',
@@ -117,7 +115,6 @@ CLINICAL_DEFAULTS = {
 ZERO_MEANS_MISSING = {'WBC_Count', 'RBC_Count', 'Hemoglobin', 'RDW',
                       'Thrombocyte_Count', 'CRP', 'Neutrophil_Percentage', 'Segmented_Neutrophils'}
 
-# --- GUI Application ---
 
 class PredictionGUI:
     def __init__(self, root):
@@ -275,8 +272,7 @@ class PredictionGUI:
         return {'diagnosis': diag, 'confidence': max(prob_yes, prob_no),
                 'prob_appendicitis': prob_yes, 'prob_no_appendicitis': prob_no}
 
-    # --- GUI Construction ---
-
+    
     def create_widgets(self):
         title_frame = ttk.Frame(self.root, padding="10")
         title_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E))
@@ -457,8 +453,7 @@ Always exercise professional judgment.
         ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN,
                   font=('Arial', 11)).grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E))
 
-    # --- Event Handlers ---
-
+    
     def _collect_inputs(self):
         d = {}
         for name, var in self.demo_vars.items(): d[name] = var.get()
