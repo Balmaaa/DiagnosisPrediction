@@ -105,14 +105,14 @@ class DecisionTreeModel:
         
         print("Performing hyperparameter tuning...")
         
-        # Define parameter grid - EXPANDED for better tuning effectiveness
+        # Define parameter grid - CONSERVATIVE to prevent overfitting
         param_grid = {
-            'criterion': ['gini', 'entropy'],
-            'max_depth': [None, 3, 5, 7, 10, 15, 20, 30],
-            'min_samples_split': [2, 5, 10, 20],
-            'min_samples_leaf': [1, 2, 4, 8],
-            'max_features': ['sqrt', 'log2', None],
-            'class_weight': ['balanced', 'balanced_subsample', None]
+            'criterion': ['gini'],
+            'max_depth': [3, 4, 5],  # Limited to shallow trees
+            'min_samples_split': [10, 20, 30],  # Higher values
+            'min_samples_leaf': [5, 10, 15],  # Higher values
+            'max_features': ['sqrt'],  # Fixed to sqrt
+            'class_weight': ['balanced']
         }
         
         # Create Decision Tree classifier with fixed seed
@@ -165,12 +165,13 @@ class DecisionTreeModel:
         if use_hyperparameter_tuning:
             self.model = self.hyperparameter_tuning(X_train, y_train)
         else:
-            # Use default parameters - ADDED: class_weight='balanced', SEED for reproducibility
+            # Use default parameters - FIXED: stronger regularization to prevent overfitting
             self.model = DecisionTreeClassifier(
                 criterion='gini',
-                max_depth=10,
-                min_samples_split=5,
-                min_samples_leaf=2,
+                max_depth=4,  # Reduced from 10 to prevent overfitting
+                min_samples_split=10,  # Increased from 5
+                min_samples_leaf=5,  # Increased from 2
+                max_features='sqrt',  # Added to limit features per split
                 class_weight='balanced',
                 random_state=SEED
             )

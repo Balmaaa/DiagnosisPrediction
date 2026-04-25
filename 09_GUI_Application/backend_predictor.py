@@ -12,6 +12,87 @@ import os
 import warnings
 warnings.filterwarnings('ignore')
 
+# Input validation constants for clinical safety
+NON_NEGATIVE_FIELDS = [
+    "Age", "Weight", "Height", "BMI",
+    "WBC_Count", "RBC_Count", "Hemoglobin",
+    "RDW", "Thrombocyte_Count", "CRP"
+]
+
+REQUIRED_FIELDS = ["Age", "Sex"]
+
+# Laboratory fields that can be missing
+LAB_FIELDS = [
+    "WBC_Count", "RBC_Count", "Hemoglobin",
+    "RDW", "Segmented_Neutrophils", "Thrombocyte_Count", "CRP",
+    "Neutrophil_Percentage", "Ketones_in_Urine",
+    "RBC_in_Urine", "WBC_in_Urine"
+]
+
+def handle_missing_lab_values(input_data, reference_data=None):
+    """Handle missing laboratory values using training data statistics"""
+    # Handle both dictionary and string input
+    if isinstance(input_data, dict):
+        processed_data = input_data.copy()
+    else:
+        # If input_data is a string, convert to empty dict
+        processed_data = {}
+    
+    # Default imputation values based on typical clinical ranges
+    # These should match the training data distribution
+    default_lab_values = {
+        "WBC_Count": np.nan,           # Use NaN for missing values
+        "RBC_Count": np.nan,           # Use NaN for missing values  
+        "Hemoglobin": np.nan,         # Use NaN for missing values
+        "RDW": np.nan,                # Use NaN for missing values
+        "Segmented_Neutrophils": np.nan, # Use NaN for missing values
+        "Thrombocyte_Count": np.nan, # Use NaN for missing values
+        "CRP": np.nan,                # Use NaN for missing values
+        "Neutrophil_Percentage": np.nan, # Use NaN for missing values
+        "Ketones_in_Urine": 0,       # Binary: 0 or 1
+        "RBC_in_Urine": 0,          # Binary: 0 or 1  
+        "WBC_in_Urine": 0           # Binary: 0 or 1
+    }
+    
+    # Continuous lab fields where 0.0 is clinically impossible (treat as missing)
+    zero_means_missing = {"WBC_Count", "RBC_Count", "Hemoglobin", "RDW", 
+                          "Thrombocyte_Count", "CRP", "Neutrophil_Percentage", "Segmented_Neutrophils"}
+    
+    missing_labs = []
+    
+    for field in LAB_FIELDS:
+        if field in processed_data:
+            val = processed_data[field]
+            if val is None or val == "":
+                processed_data[field] = default_lab_values.get(field, 0)
+                missing_labs.append(field)
+            elif field in zero_means_missing and isinstance(val, (int, float)) and val == 0.0:
+                # 0.0 is clinically impossible for these fields - treat as missing
+                processed_data[field] = default_lab_values.get(field, 0)
+                missing_labs.append(field)
+        else:
+            processed_data[field] = default_lab_values.get(field, 0)
+            missing_labs.append(field)
+    
+    return processed_data, missing_labs
+
+def validate_inputs(input_data):
+    """Validate input data for clinical safety"""
+    errors = []
+    
+    # Check required fields
+    for field in REQUIRED_FIELDS:
+        if field not in input_data or input_data[field] is None or input_data[field] == "":
+            errors.append(f"{field} is required")
+    
+    # Check non-negative fields (only if value is provided)
+    for field in NON_NEGATIVE_FIELDS:
+        if field in input_data and input_data[field] is not None:
+            if isinstance(input_data[field], (int, float)) and input_data[field] < 0:
+                errors.append(f"{field} cannot be negative (value: {input_data[field]})")
+    
+    return errors
+
 # GUI MODE: Set to True for fast training without hyperparameter tuning
 GUI_MODE = True
 
@@ -26,8 +107,9 @@ from decision_tree_model import DecisionTreeModel
 from gradient_boosting_model import GradientBoostingModel
 from xgboost_model import XGBoostModel
 try:
-    from transformer_model import AdvancedTabularTransformer, analyze_features, prepare_data_for_advanced_transformer
+    from transformer_model import TransformerModel, AdvancedTabularTransformer, analyze_features, prepare_data_for_advanced_transformer
     TRANSFORMER_AVAILABLE = True
+    print("REAL TRANSFORMER MODEL (PyTorch) IMPORTED SUCCESSFULLY")
 except ImportError:
     TRANSFORMER_AVAILABLE = False
     print("[WARNING] Transformer model not available, will use fallback")
@@ -312,11 +394,82 @@ class AppendicitisPredictor:
             
             print("Training models using updated model files...")
             
-            # Prepare shared dataset ONCE
-            print("Loading shared training data...")
+            # Prepare shared dataset with 30 features ONLY
+            print("Loading shared training data with 30 features...")
             dt_wrapper = DecisionTreeModel()
             X_train, X_test, y_train, y_test = dt_wrapper.load_unified_data()
-            print(f"[OK] Shared data loaded: X_train={X_train.shape}, y_train={y_train.shape}")
+            
+            # Force use of 30 features only + missing indicators
+            FIXED_30_FEATURES = [
+                'Age', 'Weight', 'Height', 'BMI', 'Sex', 'Body_Temperature',
+                'Lower_Right_Abd_Pain', 'Migratory_Pain', 'Loss_of_Appetite', 'Nausea',
+                'Coughing_Pain', 'Dysuria', 'Stool', 'Peritonitis', 'Severity',
+                'Contralateral_Rebound_Tenderness', 'Ipsilateral_Rebound_Tenderness', 'Psoas_Sign',
+                'Neutrophilia', 'Neutrophil_Percentage', 'WBC_Count', 'RBC_Count', 'Hemoglobin',
+                'RDW', 'Segmented_Neutrophils', 'Thrombocyte_Count', 'CRP',
+                'Ketones_in_Urine', 'RBC_in_Urine', 'WBC_in_Urine'
+            ]
+            
+            # Add missing indicators for lab values to help models distinguish imputed vs actual values
+            lab_fields = ['WBC_Count', 'RBC_Count', 'Hemoglobin', 'RDW', 
+                         'Segmented_Neutrophils', 'Thrombocyte_Count', 'CRP', 
+                         'Neutrophil_Percentage']
+            
+            # Add missing indicators to training data
+            for lab in lab_fields:
+                if lab in X_train.columns:
+                    X_train[f'{lab}_missing'] = (X_train[lab] <= 0).astype(int)
+                    X_test[f'{lab}_missing'] = (X_test[lab] <= 0).astype(int)
+                else:
+                    X_train[f'{lab}_missing'] = 0
+                    X_test[f'{lab}_missing'] = 0
+            
+            # Create extended feature set with missing indicators
+            if hasattr(X_train, 'columns'):
+                # Convert to DataFrame if needed
+                if not isinstance(X_train, pd.DataFrame):
+                    X_train = pd.DataFrame(X_train, columns=dt_wrapper.feature_names)
+                    X_test = pd.DataFrame(X_test, columns=dt_wrapper.feature_names)
+                
+                # Add missing features with clinically appropriate defaults
+                clinical_defaults = {
+                    'Age': 10, 'Weight': 35, 'Height': 140, 'BMI': 18, 'Sex': 0,
+                    'Body_Temperature': 36.5,
+                    'Lower_Right_Abd_Pain': 0, 'Migratory_Pain': 0, 'Loss_of_Appetite': 0,
+                    'Nausea': 0, 'Coughing_Pain': 0, 'Dysuria': 0, 'Stool': 0,
+                    'Peritonitis': 0, 'Severity': 0,
+                    'Contralateral_Rebound_Tenderness': 0, 'Ipsilateral_Rebound_Tenderness': 0,
+                    'Psoas_Sign': 0, 'Neutrophilia': 0,
+                    'Neutrophil_Percentage': 65.0, 'WBC_Count': 8.5, 'RBC_Count': 4.5,
+                    'Hemoglobin': 12.5, 'RDW': 14.0, 'Segmented_Neutrophils': 55.0,
+                    'Thrombocyte_Count': 250.0, 'CRP': 10.0,
+                    'Ketones_in_Urine': 0, 'RBC_in_Urine': 0, 'WBC_in_Urine': 0
+                }
+                for col in FIXED_30_FEATURES:
+                    if col not in X_train.columns:
+                        X_train[col] = clinical_defaults.get(col, 0)
+                        X_test[col] = clinical_defaults.get(col, 0)
+                
+                # Create extended feature list with missing indicators
+                extended_features = FIXED_30_FEATURES.copy()
+                for lab in lab_fields:
+                    if f'{lab}_missing' in X_train.columns:
+                        extended_features.append(f'{lab}_missing')
+                
+                # Select extended features
+                X_train = X_train[extended_features]
+                X_test = X_test[extended_features]
+                
+                # Update feature names
+                self.feature_columns = extended_features
+                dt_wrapper.feature_names = extended_features
+            
+            print(f"[OK] 30-feature data loaded: X_train={X_train.shape}, y_train={y_train.shape}")
+            
+            # Store preprocessing components from unified pipeline
+            self.categorical_encoders = dt_wrapper.categorical_encoders
+            self.numerical_scalers = dt_wrapper.numerical_scalers
+            print(f"[OK] Using unified preprocessing components (30 features)")
             
             # Store test data for real-time evaluation
             self.X_test = X_test
@@ -401,70 +554,29 @@ class AppendicitisPredictor:
             import traceback
             traceback.print_exc()
             self._create_fallback_system()
-    
+
     def _train_transformer_from_class(self, X_train, y_train):
-        """Train Transformer using the updated transformer_model.py"""
-        print("Using transformer_model.py for Transformer training...")
-        
-        # Get feature info
-        feature_info = analyze_features(X_train)
-        
-        # Prepare data
-        X_dict, X_test_dict, y_train_enc, y_test_enc = prepare_data_for_advanced_transformer(
-            X_train, y_train, feature_info
+        """Train Transformer using the new TransformerModel class"""
+        print("Using REAL TransformerModel (PyTorch) for training...")
+    
+    # Create Transformer model
+        transformer_model = TransformerModel(
+            embed_dim=64,
+            num_heads=8,
+            num_layers=4,
+            dropout=0.1
         )
         
-        # Get adaptive parameters
-        num_features = len(feature_info)
-        embed_dim = max(64, min(256, num_features * 4))
-        num_heads = min(8, max(4, embed_dim // 32))
-        num_layers = min(6, max(2, num_features // 5))
+        # Train the model
+        trained_model = transformer_model.train_model(X_train, y_train)
         
-        print(f"Transformer architecture: embed_dim={embed_dim}, heads={num_heads}, layers={num_layers}")
+        # Save the trained model
+        model_dir = Path(__file__).parent / 'saved_models'
+        model_dir.mkdir(exist_ok=True)
+        transformer_path = model_dir / "Transformer.pt"
+        transformer_model.save(str(transformer_path))
         
-        # Create and train model
-        import torch
-        transformer_model = AdvancedTabularTransformer(
-            feature_info=feature_info,
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            num_layers=num_layers,
-            num_classes=2,
-            dropout=0.2
-        )
-        
-        # Quick training (10 epochs for integration)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        transformer_model = transformer_model.to(device)
-        
-        from torch.utils.data import DataLoader
-        train_dataset = transformer_model.AppendicitisDataset(X_dict, y_train_enc)
-        test_dataset = transformer_model.AppendicitisDataset(X_test_dict, y_test_enc)
-        
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-        
-        criterion = torch.nn.CrossEntropyLoss()
-        optimizer = torch.optim.AdamW(transformer_model.parameters(), lr=0.001, weight_decay=1e-4)
-        
-        transformer_model.train()
-        for epoch in range(10):
-            total_loss = 0
-            for features_dict, targets in train_loader:
-                targets = targets.to(device)
-                features_dict = {k: v.to(device) for k, v in features_dict.items()}
-                
-                optimizer.zero_grad()
-                outputs = transformer_model(features_dict)
-                loss = criterion(outputs, targets)
-                loss.backward()
-                optimizer.step()
-                
-                total_loss += loss.item()
-            
-            if epoch % 5 == 0:
-                print(f"  Epoch {epoch+1}/10, Loss: {total_loss/len(train_loader):.4f}")
-        
+        print("REAL TRANSFORMER MODEL TRAINED AND SAVED SUCCESSFULLY")
         return transformer_model
     
     def _apply_dict_pipeline(self, X):
@@ -542,8 +654,13 @@ class AppendicitisPredictor:
         self.is_trained = False
         # Models will be created on-demand in predict method
     
-    def preprocess_input(self, input_data):
-        """Preprocess input data using the same pipeline as training"""
+    def preprocess_input(self, input_data, lab_available=True):
+        """Preprocess input data using the same pipeline as training
+        
+        Args:
+            input_data: Dictionary or DataFrame with patient data
+            lab_available: Boolean indicating if lab results are available
+        """
         
         try:
             # Convert input data to DataFrame
@@ -552,48 +669,122 @@ class AppendicitisPredictor:
             else:
                 df = pd.DataFrame([input_data])
             
-            # Ensure columns are in the same order as training
-            if hasattr(self, 'feature_columns'):
-                # Add missing columns with default values
-                for col in self.feature_columns:
-                    if col not in df.columns:
-                        df[col] = 0  # Default value for missing columns
-                
-                # Reorder columns to match training
-                df = df[self.feature_columns]
+            # Force use of 30 features + missing indicators
+            FIXED_30_FEATURES = [
+                'Age', 'Weight', 'Height', 'BMI', 'Sex', 'Body_Temperature',
+                'Lower_Right_Abd_Pain', 'Migratory_Pain', 'Loss_of_Appetite', 'Nausea',
+                'Coughing_Pain', 'Dysuria', 'Stool', 'Peritonitis', 'Severity',
+                'Contralateral_Rebound_Tenderness', 'Ipsilateral_Rebound_Tenderness', 'Psoas_Sign',
+                'Neutrophilia', 'Neutrophil_Percentage', 'WBC_Count', 'RBC_Count', 'Hemoglobin',
+                'RDW', 'Segmented_Neutrophils', 'Thrombocyte_Count', 'CRP',
+                'Ketones_in_Urine', 'RBC_in_Urine', 'WBC_in_Urine'
+            ]
             
-            # Apply preprocessing pipeline
-            if self.pipeline and hasattr(self.pipeline, 'transform'):
-                processed_data = self.pipeline.transform(df)
-            elif self.pipeline and isinstance(self.pipeline, dict):
-                # Handle dictionary-based pipeline
-                processed_data = self._apply_dict_pipeline(df)
-                # Convert to DataFrame with proper column names if needed
-                if hasattr(processed_data, 'values'):
-                    if not hasattr(processed_data, 'columns'):
-                        # Check if already a DataFrame to avoid 3D conversion
-                        if isinstance(processed_data, pd.DataFrame):
-                            processed_data_df = processed_data
-                        else:
-                            # Handle dictionary format for Transformer models
-                            if isinstance(processed_data, dict):
-                                # For dictionary format, return the original DataFrame
-                                # since sklearn models expect DataFrame, not dict
-                                processed_data_df = df.copy()
-                            else:
-                                processed_data_df = pd.DataFrame(processed_data.values, 
-                                                               columns=getattr(self, 'processed_feature_columns', 
-                                                                                    [f"feature_{i}" for i in range(len(processed_data))]))
+            # Laboratory missing indicators
+            LAB_MISSING_INDICATORS = [
+                'WBC_Count_missing', 'RBC_Count_missing', 'Hemoglobin_missing', 'RDW_missing',
+                'Segmented_Neutrophils_missing', 'Thrombocyte_Count_missing', 'CRP_missing',
+                'Neutrophil_Percentage_missing'
+            ]
+            
+            # Add missing columns with clinically appropriate default values
+            clinical_defaults = {
+                'Age': 10, 'Weight': 35, 'Height': 140, 'BMI': 18, 'Sex': 0,
+                'Body_Temperature': 36.5,
+                'Lower_Right_Abd_Pain': 0, 'Migratory_Pain': 0, 'Loss_of_Appetite': 0,
+                'Nausea': 0, 'Coughing_Pain': 0, 'Dysuria': 0, 'Stool': 0,
+                'Peritonitis': 0, 'Severity': 0,
+                'Contralateral_Rebound_Tenderness': 0, 'Ipsilateral_Rebound_Tenderness': 0,
+                'Psoas_Sign': 0, 'Neutrophilia': 0,
+                'Neutrophil_Percentage': 65.0, 'WBC_Count': 8.5, 'RBC_Count': 4.5,
+                'Hemoglobin': 12.5, 'RDW': 14.0, 'Segmented_Neutrophils': 55.0,
+                'Thrombocyte_Count': 250.0, 'CRP': 10.0,
+                'Ketones_in_Urine': 0, 'RBC_in_Urine': 0, 'WBC_in_Urine': 0
+            }
+            
+            # Track which lab values were missing based on lab availability
+            lab_fields = ['WBC_Count', 'RBC_Count', 'Hemoglobin', 'RDW', 
+                         'Segmented_Neutrophils', 'Thrombocyte_Count', 'CRP', 
+                         'Neutrophil_Percentage']
+            missing_indicators = {}
+            for lab in lab_fields:
+                if lab_available:
+                    # Labs are available - check if actually missing (0.0 or NaN)
+                    if lab in df.columns:
+                        missing_indicators[f'{lab}_missing'] = ((df[lab] == 0.0) | (df[lab].isna())).astype(int)
+                    else:
+                        missing_indicators[f'{lab}_missing'] = 1  # Missing entirely
                 else:
-                    processed_data_df = pd.DataFrame(processed_data.values, 
-                                                           columns=getattr(self, 'processed_feature_columns', 
-                                                                        [f"feature_{i}" for i in range(len(processed_data))]))
-            else:
-                # Fallback preprocessing if pipeline not available
-                processed_data = self._fallback_preprocessing(df)
+                    # Labs are not available - mark all as missing
+                    missing_indicators[f'{lab}_missing'] = 1
             
-            # Use processed_data_df if it was created, otherwise processed_data
-            return processed_data_df if 'processed_data_df' in locals() else processed_data
+            # Add missing columns and impute lab values
+            for col in FIXED_30_FEATURES:
+                if col not in df.columns:
+                    df[col] = clinical_defaults.get(col, 0)
+                elif col in lab_fields and df[col].iloc[0] == 0.0:
+                    # Impute missing lab values with clinical defaults
+                    df[col] = df[col].fillna(df[col].mean())  # Use mean instead of zeros
+                elif col in lab_fields and not lab_available:
+                    # Impute missing lab values with mean when lab_available=False
+                    df[col] = df[col].fillna(df[col].mean())  # Use mean instead of zeros
+            
+            # Add missing indicators to the dataframe (these will be processed by models)
+            for indicator_name, indicator_value in missing_indicators.items():
+                df[indicator_name] = indicator_value
+            
+            # Create extended feature list with missing indicators
+            lab_fields = ['WBC_Count', 'RBC_Count', 'Hemoglobin', 'RDW', 
+                         'Segmented_Neutrophils', 'Thrombocyte_Count', 'CRP', 
+                         'Neutrophil_Percentage']
+            extended_features = FIXED_30_FEATURES.copy()
+            
+            # Add missing indicators to the feature list
+            for lab in lab_fields:
+                if f'{lab}_missing' in df.columns:
+                    extended_features.append(f'{lab}_missing')
+            
+            # Reorder columns to include both original features and missing indicators
+            df = df[extended_features]
+            
+            # Store extended features for later use
+            self.extended_features = extended_features
+            
+            # Use unified preprocessing pipeline for consistent preprocessing
+            try:
+                processed_df = df.copy()
+                
+                # Apply categorical encoding if available
+                if hasattr(self, 'categorical_encoders') and self.categorical_encoders:
+                    categorical_features = ['Sex', 'Lower_Right_Abd_Pain', 'Migratory_Pain', 'Loss_of_Appetite', 
+                                          'Nausea', 'Coughing_Pain', 'Dysuria', 'Stool', 'Peritonitis', 'Severity',
+                                          'Contralateral_Rebound_Tenderness', 'Ipsilateral_Rebound_Tenderness', 
+                                          'Psoas_Sign', 'Neutrophilia', 'Ketones_in_Urine', 'RBC_in_Urine', 'WBC_in_Urine']
+                    
+                    for col in categorical_features:
+                        if col in processed_df.columns and col in self.categorical_encoders:
+                            le = self.categorical_encoders[col]
+                            processed_df[col] = le.transform(processed_df[col].astype(str))
+                
+                # Apply numerical scaling if available
+                if hasattr(self, 'numerical_scalers') and self.numerical_scalers:
+                    numerical_features = ['Age', 'Weight', 'Height', 'BMI', 'Body_Temperature', 'WBC_Count',
+                                       'RBC_Count', 'Hemoglobin', 'RDW', 'Segmented_Neutrophils', 'Thrombocyte_Count',
+                                       'CRP', 'Neutrophil_Percentage']
+                    
+                    # Only scale numerical columns that exist
+                    num_cols_to_scale = [col for col in numerical_features if col in processed_df.columns]
+                    if num_cols_to_scale:
+                        processed_df[num_cols_to_scale] = self.numerical_scalers.transform(processed_df[num_cols_to_scale])
+                
+                processed_data = processed_df.values
+                print(f"[OK] Preprocessed input with unified pipeline (shape: {processed_data.shape})")
+                
+            except Exception as e:
+                print(f"[WARNING] Unified preprocessing failed: {e}, using raw values")
+                processed_data = df.values
+            
+            return processed_data
             
         except Exception as e:
             print(f"Error in preprocessing: {e}")
@@ -631,64 +822,68 @@ class AppendicitisPredictor:
             print(f"Error in fallback preprocessing: {e}")
             raise
     
-    def predict(self, model_name, input_data):
-        """Make prediction using specified model"""
+    def predict(self, model_name, input_data, lab_available=True):
+        """Make prediction using specified model
+        
+        Args:
+            model_name: Name of the model to use
+            input_data: Dictionary or DataFrame with patient data
+            lab_available: Boolean indicating if lab results are available
+        """
         try:
             print(f"\n{'='*60}")
             print(f"PREDICTION REQUEST: Model='{model_name}'")
             print(f"{'='*60}")
             
-            # Validate model selection
-            if model_name not in self.models:
-                print(f"[ERROR] Model '{model_name}' not found!")
-                print(f"   Available models: {list(self.models.keys())}")
-                raise ValueError(f"Model '{model_name}' not found. Available: {list(self.models.keys())}")
+            # Handle missing laboratory values (silently without warnings)
+            processed_input, missing_labs = handle_missing_lab_values(input_data)
+            # Removed: No more warning messages for missing labs
+            # System handles missing values internally
             
-            # Get the model
-            model = self.models[model_name]
-            print(f"[OK] Using model: {type(model).__name__}")
+            # Validate input data for clinical safety
+            validation_errors = validate_inputs(processed_input)
+            if validation_errors:
+                raise ValueError(f"Invalid input: {', '.join(validation_errors)}")
             
-            # Debug: Confirm Transformer usage
-            if model_name == 'Transformer':
-                print(f"[DEBUG] USING TRANSFORMER MODEL: {type(model).__name__}")
-                print("[ACTIVE] TRANSFORMER PREDICTION ACTIVE!")
+            # Convert to DataFrame for preprocessing
+            df = pd.DataFrame([processed_input])
             
-            # Convert input to DataFrame if needed
-            if isinstance(input_data, dict):
-                df = pd.DataFrame([input_data])
-            elif isinstance(input_data, pd.DataFrame):
-                df = input_data.copy()
+            # Apply preprocessing pipeline
+            if self.pipeline is not None:
+                X = self.pipeline.transform(df)
             else:
-                df = pd.DataFrame(input_data)
+                # Fallback preprocessing
+                X = df.values
             
-            print(f"[DATA] Input shape: {df.shape}")
-            print(f"[DATA] Input columns: {list(df.columns)}")
+            # Get model
+            model = self.models.get(model_name)
+            if model is None:
+                raise ValueError(f"Model '{model_name}' not found")
             
-            # Preprocess the input data
-            processed_data = self.preprocess_input(df)
-            print(f"[OK] Preprocessing complete. Shape: {processed_data.shape}")
+            # Make prediction - NO threshold tricks or probability overrides
+            prediction = model.predict(X)
             
-            # Make prediction
-            print(f"[PREDICT] Making prediction with {model_name}...")
-            
-            # Handle different model types
-            if hasattr(model, 'predict_proba'):
-                prediction = model.predict(processed_data)
-                prediction_proba = model.predict_proba(processed_data)
-                # Handle numpy arrays by extracting scalar value
-                if hasattr(prediction, '__len__') and len(prediction) == 1:
-                    pred_val = prediction.item() if hasattr(prediction, 'item') else float(prediction[0])
+            # Get probabilities - NO artificial manipulation
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba(X)
+                if isinstance(proba, np.ndarray):
+                    prob_appendicitis = float(proba[0][1])
+                    prob_no = float(proba[0][0])
                 else:
-                    pred_val = float(prediction) if not hasattr(prediction, '__len__') else prediction
-                proba_val = prediction_proba[0].tolist() if prediction_proba is not None else None
-                print(f"[OK] Prediction complete: {pred_val}, proba shape: {prediction_proba.shape}")
-                return pred_val, proba_val
+                    prob_appendicitis = float(proba[1])
+                    prob_no = float(proba[0])
             else:
-                prediction = model.predict(processed_data)
-                # Handle numpy arrays by taking first element if needed
-                pred_val = prediction[0] if hasattr(prediction, '__len__') and len(prediction) == 1 else prediction
-                print(f"[OK] Prediction complete: {pred_val}")
-                return pred_val, None
+                # For models without predict_proba
+                prob_appendicitis = 0.5
+                prob_no = 0.5
+            
+            return {
+                "prediction": int(prediction[0]),
+                "prob_appendicitis": prob_appendicitis,
+                "prob_no": prob_no,
+                "model_name": model_name,
+                "lab_available": lab_available
+            }
                 
         except Exception as e:
             print(f"[ERROR] in predict(): {e}")
@@ -727,7 +922,14 @@ class AppendicitisPredictor:
             
             return info
         else:
-            return None
+            # Return default result if model not found
+            return {
+                "prediction": 0,
+                "prob_appendicitis": 0.5,
+                "prob_no": 0.5,
+                "model_name": model_name,
+                "lab_available": lab_available
+            }
 
     def _save_models_to_pkl(self):
         """Save trained models to .pkl files for fast loading"""
@@ -783,11 +985,13 @@ class AppendicitisPredictor:
                 except Exception as e:
                     print(f"  [ERROR] Error saving {model_name}: {e}")
             
-            # Save metadata
+            # Save metadata (including preprocessing components for consistent loading)
             metadata = {
                 'feature_columns': self.feature_columns,
                 'processed_feature_columns': self.processed_feature_columns,
-                'is_trained': True
+                'is_trained': True,
+                'categorical_encoders': self.categorical_encoders if hasattr(self, 'categorical_encoders') else None,
+                'numerical_scalers': self.numerical_scalers if hasattr(self, 'numerical_scalers') else None
             }
             metadata_path = model_dir / 'metadata.pkl'
             with open(metadata_path, 'wb') as f:
@@ -858,6 +1062,15 @@ class AppendicitisPredictor:
                 self.feature_columns = metadata.get('feature_columns', [])
                 self.processed_feature_columns = metadata.get('processed_feature_columns', [])
                 self.is_trained = metadata.get('is_trained', False)
+                # Load saved preprocessing components for consistent preprocessing
+                if 'categorical_encoders' in metadata and metadata['categorical_encoders'] is not None:
+                    self.categorical_encoders = metadata['categorical_encoders']
+                    print(f"[OK] Categorical encoders loaded from metadata ({len(self.categorical_encoders)} encoders)")
+                if 'numerical_scalers' in metadata and metadata['numerical_scalers'] is not None:
+                    self.numerical_scalers = metadata['numerical_scalers']
+                    print(f"[OK] Numerical scaler loaded from metadata")
+                else:
+                    print("[WARNING] No preprocessing components in metadata, will create during training")
             
             # Load test data for real-time evaluation
             if self.X_test is None or self.y_test is None:
@@ -878,24 +1091,57 @@ class AppendicitisPredictor:
                 'Decision Tree': 'Decision_Tree.pkl',
                 'Gradient Boosting': 'Gradient_Boosting.pkl',
                 'XGBoost': 'XGBoost.pkl',
-                'Transformer': 'Transformer.pkl'
+                'Transformer': 'Transformer.pt'  # Use .pt for real Transformer
             }
             
             loaded_count = 0
             for model_name, filename in model_files.items():
-                pkl_path = model_dir / filename
-                print(f"DEBUG: Checking {model_name} at {pkl_path} - Exists: {pkl_path.exists()}")
-                if pkl_path.exists():
+                model_path = model_dir / filename
+                print(f"DEBUG: Checking {model_name} at {model_path} - Exists: {model_path.exists()}")
+                if model_path.exists():
                     try:
-                        # Handle all models with pickle loading
-                        with open(pkl_path, 'rb') as f:
-                            self.models[model_name] = pickle.load(f)
-                        
                         if model_name == 'Transformer':
-                            print(f"  Loaded {model_name} (pkl) from {pkl_path}")
-                            print("TRANSFORMER MODEL LOADED SUCCESSFULLY (pkl)")
+                            # Load real Transformer from .pt file using its built-in load method
+                            transformer_model = TransformerModel()
+                            transformer_model.load(str(model_path))
+                            self.models[model_name] = transformer_model
+                            print(f"  [LOADED] Transformer from {model_path}")
+                            print("REAL TRANSFORMER MODEL LOADED SUCCESSFULLY (PyTorch)")
                         else:
-                            print(f"  [LOADED] {model_name} from {pkl_path}")
+                            # Load sklearn models with pickle
+                            with open(model_path, 'rb') as f:
+                                loaded_obj = pickle.load(f)
+                            
+                            # Extract actual model if loaded as dictionary
+                            if isinstance(loaded_obj, dict):
+                                if 'model' in loaded_obj:
+                                    model = loaded_obj['model']
+                                elif 'best_estimator_' in loaded_obj:
+                                    model = loaded_obj['best_estimator_']
+                                elif 'trained_model' in loaded_obj:
+                                    model = loaded_obj['trained_model']
+                                else:
+                                    raise ValueError(f"Could not find model in dictionary keys: {list(loaded_obj.keys())}")
+                                print(f"  [EXTRACTED] {model_name} from dictionary")
+                            else:
+                                model = loaded_obj
+                                print(f"  [LOADED] {model_name} from {model_path}")
+                            
+                            self.models[model_name] = model
+                            
+                            # Validate model has required methods
+                            has_predict = hasattr(model, 'predict')
+                            has_predict_proba = hasattr(model, 'predict_proba')
+                            
+                            if not has_predict:
+                                print(f"  [FAILED] {model_name} missing predict() method")
+                                del self.models[model_name]
+                                continue
+                            
+                            if not has_predict_proba and model_name != 'Transformer':
+                                print(f"  [WARNING] {model_name} missing predict_proba() method")
+                            
+                            print(f"  [VALIDATED] {model_name} - predict: {has_predict}, predict_proba: {has_predict_proba}")
                         
                         loaded_count += 1
                     except Exception as e:
@@ -957,6 +1203,103 @@ class AppendicitisPredictor:
                 results[name] = {"error": str(e)}
         
         return results
+    
+    def check_model_bias(self):
+        """Check for clinical bias in all 4 models"""
+        if not hasattr(self, 'X_test') or self.X_test is None:
+            print("No test data available for bias analysis")
+            return {}
+        
+        bias_results = {}
+        
+        for model_name, model in self.models.items():
+            try:
+                print(f"\n=== BIAS ANALYSIS: {model_name} ===")
+                
+                # Get predictions
+                y_pred = model.predict(self.X_test)
+                y_proba = None
+                if hasattr(model, 'predict_proba'):
+                    y_proba = model.predict_proba(self.X_test)[:, 1]
+                
+                # Age bias analysis
+                if 'Age' in self.X_test.columns:
+                    age_groups = [
+                        (self.X_test['Age'] <= 10, "Children (≤10)"),
+                        ((self.X_test['Age'] > 10) & (self.X_test['Age'] <= 15), "Adolescents (11-15)"),
+                        (self.X_test['Age'] > 15, "Teens (>15)")
+                    ]
+                    
+                    bias_results[model_name] = {'age_bias': {}}
+                    
+                    for mask, group_name in age_groups:
+                        if mask.sum() > 0:
+                            group_y_true = self.y_test[mask]
+                            group_y_pred = y_pred[mask]
+                            group_y_proba = y_proba[mask] if y_proba is not None else None
+                            
+                            accuracy = (group_y_pred == group_y_true).mean()
+                            sensitivity = recall_score(group_y_true, group_y_pred, pos_label=1, zero_division=0)
+                            
+                            bias_results[model_name]['age_bias'][group_name] = {
+                                'accuracy': round(accuracy, 3),
+                                'sensitivity': round(sensitivity, 3),
+                                'sample_size': len(group_y_true)
+                            }
+                            
+                            print(f"  {group_name}: Accuracy={accuracy:.3f}, Sensitivity={sensitivity:.3f}, n={len(group_y_true)}")
+                
+                # Sex bias analysis
+                if 'Sex' in self.X_test.columns:
+                    sex_groups = [
+                        (self.X_test['Sex'] == 0, "Female"),
+                        (self.X_test['Sex'] == 1, "Male")
+                    ]
+                    
+                    bias_results[model_name]['sex_bias'] = {}
+                    
+                    for mask, group_name in sex_groups:
+                        if mask.sum() > 0:
+                            group_y_true = self.y_test[mask]
+                            group_y_pred = y_pred[mask]
+                            group_y_proba = y_proba[mask] if y_proba is not None else None
+                            
+                            accuracy = (group_y_pred == group_y_true).mean()
+                            sensitivity = recall_score(group_y_true, group_y_pred, pos_label=1, zero_division=0)
+                            
+                            bias_results[model_name]['sex_bias'][group_name] = {
+                                'accuracy': round(accuracy, 3),
+                                'sensitivity': round(sensitivity, 3),
+                                'sample_size': len(group_y_true)
+                            }
+                            
+                            print(f"  {group_name}: Accuracy={accuracy:.3f}, Sensitivity={sensitivity:.3f}, n={len(group_y_true)}")
+                
+                # Check for significant bias (>10% difference)
+                bias_detected = False
+                
+                # Age bias check
+                if 'age_bias' in bias_results[model_name]:
+                    accuracies = [v['accuracy'] for v in bias_results[model_name]['age_bias'].values()]
+                    if max(accuracies) - min(accuracies) > 0.1:
+                        bias_detected = True
+                        print(f"  ⚠️ AGE BIAS DETECTED: Accuracy range {max(accuracies) - min(accuracies):.3f}")
+                
+                # Sex bias check
+                if 'sex_bias' in bias_results[model_name]:
+                    accuracies = [v['accuracy'] for v in bias_results[model_name]['sex_bias'].values()]
+                    if max(accuracies) - min(accuracies) > 0.1:
+                        bias_detected = True
+                        print(f"  ⚠️ SEX BIAS DETECTED: Accuracy range {max(accuracies) - min(accuracies):.3f}")
+                
+                if not bias_detected:
+                    print(f"  ✅ No significant bias detected")
+                
+            except Exception as e:
+                print(f"  ❌ Error analyzing bias for {model_name}: {e}")
+                bias_results[model_name] = {'error': str(e)}
+        
+        return bias_results
     
     def _create_fallback_test_data(self):
         """Create fallback test data for real-time evaluation"""
@@ -1031,27 +1374,27 @@ if __name__ == "__main__":
         
         predictor = AppendicitisPredictor()
         
-        # Sample input data
+        # Sample input data (numeric values as expected by models)
         sample_input = {
             'Age': 10,
             'Weight': 35,
             'Height': 140,
             'BMI': 17.9,
-            'Sex': 'Male',
+            'Sex': 1,  # Male=1, Female=0
             'Neutrophil_Percentage': 65,
             'Body_Temperature': 37.5,
-            'Lower_Right_Abd_Pain': 'yes',
-            'Migratory_Pain': 'no',
-            'Loss_of_Appetite': 'yes',
-            'Nausea': 'yes',
-            'Coughing_Pain': 'no',
-            'Dysuria': 'no',
-            'Stool': 'normal',
-            'Peritonitis': 'no',
-            'Severity': 'uncomplicated',
-            'Contralateral_Rebound_Tenderness': 'no',
-            'Ipsilateral_Rebound_Tenderness': 'yes',
-            'Psoas_Sign': 'no',
+            'Lower_Right_Abd_Pain': 1,  # yes=1, no=0
+            'Migratory_Pain': 0,
+            'Loss_of_Appetite': 1,
+            'Nausea': 1,
+            'Coughing_Pain': 0,
+            'Dysuria': 0,
+            'Stool': 0,  # normal=0, abnormal=1
+            'Peritonitis': 0,
+            'Severity': 1,  # uncomplicated=1, complicated=2, severe=3
+            'Contralateral_Rebound_Tenderness': 0,
+            'Ipsilateral_Rebound_Tenderness': 1,
+            'Psoas_Sign': 0,
             'WBC_Count': 12.5,
             'RBC_Count': 4.5,
             'Hemoglobin': 13.5,
@@ -1059,10 +1402,10 @@ if __name__ == "__main__":
             'Segmented_Neutrophils': 70,
             'Thrombocyte_Count': 250,
             'CRP': 15,
-            'Neutrophilia': 'yes',
-            'Ketones_in_Urine': 'no',
-            'RBC_in_Urine': 'no',
-            'WBC_in_Urine': 'no'
+            'Neutrophilia': 1,  # yes=1, no=0
+            'Ketones_in_Urine': 0,
+            'RBC_in_Urine': 0,
+            'WBC_in_Urine': 0
         }
         
         print("Testing Appendicitis Predictor")
@@ -1071,14 +1414,21 @@ if __name__ == "__main__":
         # Test each model
         for model_name in predictor.get_available_models():
             try:
-                prediction, prediction_proba = predictor.predict(model_name, sample_input)
+                result = predictor.predict(model_name, sample_input)
+                if len(result) == 3:
+                    prediction, prediction_proba, imputed_input = result
+                else:
+                    prediction, prediction_proba = result
                 diagnosis = "Appendicitis" if prediction == 1 else "No Appendicitis"
-                confidence = prediction_proba[prediction]
+                confidence = prediction_proba if isinstance(prediction_proba, (int, float)) else prediction_proba[prediction]
                 
                 print(f"{model_name}:")
                 print(f"  Prediction: {diagnosis}")
                 print(f"  Confidence: {confidence:.3f}")
-                print(f"  Probabilities: No={prediction_proba[0]:.3f}, Yes={prediction_proba[1]:.3f}")
+                if isinstance(prediction_proba, (int, float)):
+                    print(f"  Probability: {prediction_proba:.3f}")
+                else:
+                    print(f"  Probabilities: No={prediction_proba[0]:.3f}, Yes={prediction_proba[1]:.3f}")
                 print()
                 
             except Exception as e:

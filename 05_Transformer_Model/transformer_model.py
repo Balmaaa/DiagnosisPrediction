@@ -119,7 +119,7 @@ class AdvancedTabularTransformer(nn.Module):
     """Advanced Transformer model with proper feature embeddings and multi-feature sequences"""
     
     def __init__(self, feature_info, embed_dim=64, num_heads=8, num_layers=4, 
-                 num_classes=2, dropout=0.1):
+                 num_classes=2, dropout=0.3):  # Increased dropout for regularization
         super(AdvancedTabularTransformer, self).__init__()
         
         self.feature_info = feature_info
@@ -147,7 +147,7 @@ class AdvancedTabularTransformer(nn.Module):
         # Multiple transformer layers for feature interaction
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Classification head with proper architecture
+        # Classification head with proper architecture - SINGLE OUTPUT for binary classification
         self.classifier = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Dropout(dropout),
@@ -157,7 +157,7 @@ class AdvancedTabularTransformer(nn.Module):
             nn.Linear(embed_dim // 2, embed_dim // 4),
             nn.GELU(),
             nn.Dropout(dropout * 0.25),
-            nn.Linear(embed_dim // 4, num_classes)
+            nn.Linear(embed_dim // 4, 1)  # Single output for binary classification
         )
         
         # Initialize weights
@@ -349,7 +349,9 @@ class AppendicitisDatasetDict(Dataset):
     
     def __init__(self, features_dict, targets):
         self.features_dict = features_dict
-        self.targets = torch.LongTensor(targets)
+        if hasattr(targets, 'values'):
+            targets = targets.values
+        self.targets = torch.LongTensor(np.array(targets, dtype=np.int64))
         
         # Get batch size from first feature
         first_key = list(features_dict.keys())[0]
@@ -366,13 +368,19 @@ class AppendicitisDatasetDict(Dataset):
 class TransformerTrainer:
     """Training and evaluation pipeline for transformer model"""
     
-    def __init__(self, model, device='cpu'):
+    def __init__(self, model, device='cpu', pos_weight=None):
         self.model = model.to(device)
         self.device = device
-        self.criterion = nn.CrossEntropyLoss()
+        # BCEWithLogitsLoss for single-output binary classification
+        if pos_weight is not None:
+            self.criterion = nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor([pos_weight], dtype=torch.float32).to(device))
+            print(f"[BCEWithLogitsLoss] pos_weight={pos_weight:.4f}")
+        else:
+            self.criterion = nn.BCEWithLogitsLoss()
+            print("[BCEWithLogitsLoss] no class weighting")
         self.optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
-        # Disabled LR scheduler for fair comparison with baseline models
-        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', patience=5)
+        self.temperature = 1.0  # Will be calibrated after training
         
     def train_epoch(self, dataloader):
         self.model.train()
@@ -381,66 +389,111 @@ class TransformerTrainer:
         total = 0
         
         for features_dict, targets in dataloader:
-            # Move to device
             targets = targets.to(self.device)
-            
-            # Move features to device
             features_dict = {k: v.to(self.device) for k, v in features_dict.items()}
             
             self.optimizer.zero_grad()
-            outputs = self.model(features_dict)
-            loss = self.criterion(outputs, targets)
+            logits = self.model(features_dict).squeeze(-1)  # (batch_size,)
+            targets_float = targets.float()  # BCE requires float targets
+            loss = self.criterion(logits, targets_float)
             loss.backward()
             
-            # Disabled gradient clipping for fair comparison with baseline models
-            # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            # Gradient clipping for stability
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             
             self.optimizer.step()
             
             total_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
+            probs = torch.sigmoid(logits)
+            predicted = (probs > 0.5).long()
             total += targets.size(0)
             correct += (predicted == targets).sum().item()
             
         return total_loss / len(dataloader), 100 * correct / total
     
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader, debug=False):
         self.model.eval()
         total_loss = 0
         correct = 0
         total = 0
         all_predictions = []
         all_targets = []
+        all_probs = []
+        all_logits = []
         
         with torch.no_grad():
             for features_dict, targets in dataloader:
                 targets = targets.to(self.device)
                 features_dict = {k: v.to(self.device) for k, v in features_dict.items()}
                 
-                outputs = self.model(features_dict)
-                loss = self.criterion(outputs, targets)
+                logits = self.model(features_dict).squeeze(-1)  # (batch_size,)
+                targets_float = targets.float()
+                loss = self.criterion(logits, targets_float)
                 
                 total_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
+                probs = torch.sigmoid(logits / self.temperature)  # Apply temperature scaling
+                predicted = (probs > 0.5).long()
                 total += targets.size(0)
                 correct += (predicted == targets).sum().item()
                 
                 all_predictions.extend(predicted.cpu().numpy())
                 all_targets.extend(targets.cpu().numpy())
+                all_probs.extend(probs.cpu().numpy())
+                all_logits.extend(logits.cpu().numpy())
+        
+        if debug:
+            logits_arr = np.array(all_logits)
+            probs_arr = np.array(all_probs)
+            print(f"  [DEBUG] Logits - min:{logits_arr.min():.4f} max:{logits_arr.max():.4f} "
+                  f"mean:{logits_arr.mean():.4f} std:{logits_arr.std():.4f}")
+            print(f"  [DEBUG] Probs  - min:{probs_arr.min():.4f} max:{probs_arr.max():.4f} "
+                  f"mean:{probs_arr.mean():.4f} std:{probs_arr.std():.4f}")
         
         return total_loss / len(dataloader), 100 * correct / total, all_predictions, all_targets
     
+    def calibrate_temperature(self, val_loader):
+        """Calibrate temperature scaling on validation set for better probability estimates"""
+        self.model.eval()
+        nll_criterion = nn.BCEWithLogitsLoss()
+        
+        # Collect all logits and targets
+        all_logits = []
+        all_targets = []
+        with torch.no_grad():
+            for features_dict, targets in val_loader:
+                targets = targets.to(self.device)
+                features_dict = {k: v.to(self.device) for k, v in features_dict.items()}
+                logits = self.model(features_dict).squeeze(-1)
+                all_logits.append(logits)
+                all_targets.append(targets.float())
+        
+        all_logits = torch.cat(all_logits)
+        all_targets = torch.cat(all_targets)
+        
+        # Optimize temperature
+        temperature = torch.tensor([1.0], requires_grad=True, device=self.device)
+        optimizer = optim.LBFGS([temperature], lr=0.01, max_iter=50)
+        
+        def eval_loss():
+            optimizer.zero_grad()
+            scaled_logits = all_logits / temperature
+            loss = nll_criterion(scaled_logits, all_targets)
+            loss.backward()
+            return loss
+        
+        optimizer.step(eval_loss)
+        self.temperature = temperature.item()
+        print(f"[CALIBRATION] Temperature scaled: {self.temperature:.4f}")
+        return self.temperature
+
     def train(self, train_loader, val_loader, epochs=50, patience=10):
-        best_val_acc = 0
+        best_val_loss = float('inf')
         patience_counter = 0
         training_history = []
         
         for epoch in range(epochs):
             train_loss, train_acc = self.train_epoch(train_loader)
-            val_loss, val_acc, _, _ = self.evaluate(val_loader)
-            
-            # Disabled LR scheduler for fair comparison
-            # self.scheduler.step(val_loss)
+            val_loss, val_acc, _, _ = self.evaluate(val_loader, debug=(epoch % 10 == 0))
             
             training_history.append({
                 'epoch': epoch + 1,
@@ -454,11 +507,11 @@ class TransformerTrainer:
             print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
             print(f"  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
             
-            # Early stopping
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+            # Early stopping on validation loss (more stable than accuracy)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 patience_counter = 0
-                # Save best model
+                # Save best model state dict
                 torch.save(self.model.state_dict(), 'best_advanced_transformer_model.pth')
             else:
                 patience_counter += 1
@@ -466,6 +519,10 @@ class TransformerTrainer:
             if patience_counter >= patience:
                 print(f"Early stopping at epoch {epoch+1}")
                 break
+        
+        # Calibrate temperature after training
+        print("\n[CALIBRATION] Running temperature scaling...")
+        self.calibrate_temperature(val_loader)
         
         return training_history
 
@@ -930,17 +987,27 @@ def main():
             print(f"[Baseline models already have hyperparameter tuning]")
             print(f"{'='*60}")
             
+            # Compute class weights for BCEWithLogitsLoss
+            y_train_arr = y_train.values if hasattr(y_train, 'values') else np.array(y_train)
+            n_negative = int(np.sum(y_train_arr == 0))
+            n_positive = int(np.sum(y_train_arr == 1))
+            # pos_weight weights the positive class; cap to avoid extreme values
+            raw_pw = n_negative / max(n_positive, 1)
+            pos_weight = max(0.05, min(raw_pw, 4.0))
+            print(f"Class distribution - No Appendicitis: {n_negative}, Appendicitis: {n_positive}")
+            print(f"pos_weight for BCEWithLogitsLoss: {pos_weight:.4f} (raw={raw_pw:.4f})")
+
             model_params = {
-                'embed_dim': 64,
+                'embed_dim': 128,
                 'num_heads': 8,
-                'num_layers': 4,
-                'dropout': 0.1,
+                'num_layers': 6,
+                'dropout': 0.2,
                 'num_classes': 2
             }
             training_params = {
                 'batch_size': 32,
-                'learning_rate': 0.001,
-                'weight_decay': 1e-4
+                'learning_rate': 0.0005,
+                'weight_decay': 1e-3
             }
             tuning_results = []
             
@@ -974,23 +1041,24 @@ def main():
             train_loader = DataLoader(train_dataset, batch_size=training_params['batch_size'], shuffle=True)
             test_loader = DataLoader(test_dataset, batch_size=training_params['batch_size'], shuffle=False)
             
-            # Initialize trainer with optimized parameters
-            trainer = TransformerTrainer(model, device)
+            # Initialize trainer with BCEWithLogitsLoss and pos_weight
+            trainer = TransformerTrainer(model, device, pos_weight=pos_weight)
             trainer.optimizer = optim.AdamW(
                 model.parameters(), 
                 lr=training_params['learning_rate'], 
                 weight_decay=training_params['weight_decay']
             )
             
-            # Train model
+            # Train model (more epochs for better convergence)
             print(f"\nTraining advanced transformer model...")
-            training_history = trainer.train(train_loader, test_loader, epochs=50, patience=10)
+            training_history = trainer.train(train_loader, test_loader, epochs=100, patience=15)
             
             # Load best model for evaluation
-            model.load_state_dict(torch.load('best_advanced_transformer_model.pth'))
+            model.load_state_dict(torch.load('best_advanced_transformer_model.pth', weights_only=True))
             
-            # Final evaluation
-            test_loss, test_acc, predictions, targets = trainer.evaluate(test_loader)
+            # Final evaluation with debug output
+            print(f"\n[FINAL EVALUATION]")
+            test_loss, test_acc, predictions, targets = trainer.evaluate(test_loader, debug=True)
             
             # Calculate medical metrics
             metrics = calculate_medical_metrics(targets, predictions)
@@ -1038,13 +1106,40 @@ def main():
                 'label_encoder': label_encoder,
                 'categorical_encoders': categorical_encoders,
                 'input_features': feature_names,
-                'timestamp': timestamp
+                'timestamp': timestamp,
+                'temperature': trainer.temperature,
+                'pos_weight': pos_weight
             }
             
             with open(results_file, 'wb') as f:
                 pickle.dump(results, f)
             
             print(f"\nResults saved to: {results_file}")
+            
+            # Save full checkpoint for GUI inference (.pt)
+            gui_checkpoint_path = Path(__file__).parent.parent / '09_GUI_Application' / 'saved_models' / 'Transformer.pt'
+            gui_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use StandardScaler params from metadata (computed on RAW data before scaling)
+            # This ensures GUI can normalize raw input the same way training data was normalized
+            scaler = scalers  # This is the numerical_scalers from prepare_unified_data
+            norm_means = scaler.mean_.astype(np.float32) if hasattr(scaler, 'mean_') else np.zeros(len(NUMERICAL_FEATURES), dtype=np.float32)
+            norm_stds = scaler.scale_.astype(np.float32) if hasattr(scaler, 'scale_') else np.ones(len(NUMERICAL_FEATURES), dtype=np.float32)
+            
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'feature_info': feature_info,
+                'embed_dim': model_params['embed_dim'],
+                'num_heads': model_params['num_heads'],
+                'num_layers': model_params['num_layers'],
+                'dropout': model_params['dropout'],
+                'is_trained': True,
+                'normalization_means': norm_means,
+                'normalization_stds': norm_stds,
+                'temperature': trainer.temperature,
+                'pos_weight': pos_weight
+            }, gui_checkpoint_path)
+            print(f"GUI checkpoint saved to: {gui_checkpoint_path}")
         
         print(f"\n{'='*80}")
         print("ADVANCED TRANSFORMER MODEL TRAINING COMPLETED")
@@ -1052,6 +1147,8 @@ def main():
         print("[OK] Multi-feature sequence processing")
         print("[OK] Model training completed")
         print("[OK] Proper Transformer architecture")
+        print("[OK] BCEWithLogitsLoss with class weighting")
+        print("[OK] Temperature scaling calibrated")
         print(f"{'='*80}")
         
     except Exception as e:
@@ -1087,6 +1184,300 @@ def split_data_for_dict(X_dict, y, test_size=0.4, random_state=SEED):
     print(f"Testing target distribution: {np.bincount(y_test)}")
     
     return X_train_dict, X_test_dict, y_train, y_test
+
+class TransformerModel:
+    """Real PyTorch Transformer model with sklearn-compatible interface"""
+    
+    def __init__(self, embed_dim=64, num_heads=8, num_layers=4, dropout=0.1):
+        print("REAL TRANSFORMER MODEL (PyTorch) INITIALIZED")
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.model = None
+        self.feature_info = None
+        self.is_trained = False
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+    def _create_feature_info(self, X):
+        """Create feature information for tabular data"""
+        feature_info = {}
+        if hasattr(X, 'columns'):
+            for i, col in enumerate(X.columns):
+                feature_info[col] = {
+                    'type': 'numerical',
+                    'unique_values': len(X[col].unique()),
+                    'embed_dim': 8,
+                    'range': [float(X[col].min()), float(X[col].max())],
+                    'mean': float(X[col].mean()),
+                    'std': float(X[col].std())
+                }
+        else:
+            # For numpy arrays
+            for i in range(X.shape[1]):
+                feature_info[f'feature_{i}'] = {
+                    'type': 'numerical',
+                    'unique_values': len(np.unique(X[:, i])),
+                    'embed_dim': 8,
+                    'range': [float(np.min(X[:, i])), float(np.max(X[:, i]))],
+                    'mean': float(np.mean(X[:, i])),
+                    'std': float(np.std(X[:, i]))
+                }
+        return feature_info
+    
+    def train_model(self, X_train, y_train):
+        """Train the PyTorch Transformer model"""
+        print("Training Transformer with PyTorch...")
+        
+        # Create feature info
+        self.feature_info = self._create_feature_info(X_train)
+        
+        # Create model
+        self.model = AdvancedTabularTransformer(
+            feature_info=self.feature_info,
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            num_layers=self.num_layers,
+            dropout=self.dropout,
+            num_classes=2
+        )
+        
+        self.model = self.model.to(self.device)
+        
+        # Convert data to tensors
+        if hasattr(X_train, 'values'):
+            X_array = X_train.values
+        else:
+            X_array = X_train
+            
+        if hasattr(y_train, 'values'):
+            y_array = y_train.values
+        else:
+            y_array = y_train
+        
+        # NORMALIZE INPUTS - STEP 1 FIX
+        # Replace missing values (zeros) with mean values
+        X_normalized = X_array.copy()
+        for i in range(X_normalized.shape[1]):
+            col_values = X_normalized[:, i]
+            # Replace zeros with mean of non-zero values
+            non_zero_mask = col_values != 0
+            if np.any(non_zero_mask):
+                mean_val = np.mean(col_values[non_zero_mask])
+                X_normalized[~non_zero_mask, i] = mean_val
+        
+        # Apply mean normalization
+        for i in range(X_normalized.shape[1]):
+            col_mean = np.mean(X_normalized[:, i])
+            col_std = np.std(X_normalized[:, i])
+            if col_std > 0:
+                X_normalized[:, i] = (X_normalized[:, i] - col_mean) / col_std
+        
+        # Create simple dataset (convert to proper format)
+        X_tensor = torch.FloatTensor(X_normalized)
+        y_tensor = torch.LongTensor(y_array)
+        
+        # Store normalization parameters for prediction
+        self.normalization_means = np.mean(X_array, axis=0)
+        self.normalization_stds = np.std(X_array, axis=0)
+        self.normalization_means[np.isnan(self.normalization_means)] = 0
+        self.normalization_stds[np.isnan(self.normalization_stds)] = 1
+        
+        # Create simple dataset that works with tensors
+        class SimpleDataset(Dataset):
+            def __init__(self, X, y):
+                self.X = X
+                self.y = y
+            
+            def __len__(self):
+                return len(self.X)
+            
+            def __getitem__(self, idx):
+                return self.X[idx], self.y[idx]
+        
+        dataset = SimpleDataset(X_tensor, y_tensor)
+        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+        
+        # Training setup with CLASS BALANCING - STEP 3 FIX
+        # Calculate class weights for balancing
+        positive_samples = np.sum(y_array == 1)
+        negative_samples = np.sum(y_array == 0)
+        pos_weight = negative_samples / positive_samples if positive_samples > 0 else 1.0
+        print(f"Class balance - Positive: {positive_samples}, Negative: {negative_samples}, Weight: {pos_weight:.2f}")
+        
+        # Use BCEWithLogitsLoss with class weighting - FIXED for single output
+        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]).to(self.device))
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4, weight_decay=1e-4)  # Lower learning rate
+        
+        # Training loop with IMPROVEMENTS - STEP 4 FIX
+        self.model.train()
+        epochs = 50  # Increase epochs for better training
+        
+        for epoch in range(epochs):
+            total_loss = 0
+            for features, targets in dataloader:
+                features = features.to(self.device)
+                targets = targets.to(self.device)
+                
+                # Convert to dictionary format for the model
+                features_dict = {'numerical': features}
+                
+                optimizer.zero_grad()
+                outputs = self.model(features_dict)
+                
+                # For BCEWithLogitsLoss with single output, targets need to be float
+                targets_float = targets.float().unsqueeze(1)  # Shape: (batch_size, 1)
+                
+                loss = criterion(outputs, targets_float)
+                loss.backward()
+                optimizer.step()
+                
+                total_loss += loss.item()
+            
+            if epoch % 10 == 0:
+                print(f"  Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):.4f}")
+        
+        self.is_trained = True
+        print("REAL TRANSFORMER MODEL TRAINING COMPLETED")
+        return self.model
+    
+    def predict(self, X):
+        """Make predictions (0 or 1) with ADJUSTED THRESHOLD - STEP 7 FIX"""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before making predictions")
+        
+        self.model.eval()
+        with torch.no_grad():
+            # Convert input to tensor
+            if hasattr(X, 'values'):
+                X_array = X.values
+            else:
+                X_array = X
+            
+            # NORMALIZE INPUT using stored parameters
+            X_normalized = X_array.copy()
+            for i in range(X_normalized.shape[1]):
+                # Replace zeros with mean
+                zero_mask = X_normalized[:, i] == 0
+                if np.any(zero_mask):
+                    X_normalized[zero_mask, i] = self.normalization_means[i]
+                
+                # Apply normalization
+                if self.normalization_stds[i] > 0:
+                    X_normalized[:, i] = (X_normalized[:, i] - self.normalization_means[i]) / self.normalization_stds[i]
+            
+            X_dict = {'numerical': torch.FloatTensor(X_normalized).to(self.device)}
+            
+            outputs = self.model(X_dict)
+            probabilities = torch.sigmoid(outputs.squeeze())  # Apply sigmoid to single logit output
+            
+            # ADJUSTED DECISION THRESHOLD - STEP 7 FIX
+            threshold = 0.5  # Standard threshold for balanced predictions
+            predicted = (probabilities > threshold).long()
+            
+            # DEBUG OUTPUT - STEP 8 FIX
+            prob_val = probabilities.cpu().numpy()
+            pred_val = predicted.cpu().numpy()
+            if prob_val.ndim == 0:
+                prob_val = float(prob_val)
+                pred_val = int(pred_val)
+            else:
+                prob_val = prob_val[0]
+                pred_val = pred_val[0]
+            print(f"TRANSFORMER PROBABILITY: {prob_val:.3f}, THRESHOLD: {threshold}, PREDICTION: {pred_val}")
+            
+            # Ensure return is always array
+            pred_array = predicted.cpu().numpy()
+            if pred_array.ndim == 0:
+                return np.array([int(pred_array)])
+            return pred_array
+    
+    def predict_proba(self, X):
+        """Return probabilities [P(0), P(1)] with PROPER SIGMOID - STEP 5 FIX"""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before making predictions")
+        
+        self.model.eval()
+        with torch.no_grad():
+            # Convert input to tensor
+            if hasattr(X, 'values'):
+                X_array = X.values
+            else:
+                X_array = X
+            
+            # NORMALIZE INPUT using stored parameters
+            X_normalized = X_array.copy()
+            for i in range(X_normalized.shape[1]):
+                # Replace zeros with mean
+                zero_mask = X_normalized[:, i] == 0
+                if np.any(zero_mask):
+                    X_normalized[zero_mask, i] = self.normalization_means[i]
+                
+                # Apply normalization
+                if self.normalization_stds[i] > 0:
+                    X_normalized[:, i] = (X_normalized[:, i] - self.normalization_means[i]) / self.normalization_stds[i]
+            
+            X_dict = {'numerical': torch.FloatTensor(X_normalized).to(self.device)}
+            
+            outputs = self.model(X_dict)
+            # Apply sigmoid properly for binary classification
+            probabilities = torch.sigmoid(outputs)
+            
+            # Format as [P(0), P(1)]
+            prob_class_0 = (1 - probabilities[:, 0]).cpu().numpy()
+            prob_class_1 = probabilities[:, 0].cpu().numpy()
+            
+            result = np.column_stack([prob_class_0, prob_class_1])
+            
+            return result
+    
+    def save(self, filepath):
+        """Save model state dict with normalization parameters"""
+        if self.model is not None:
+            torch.save({
+                'model_state_dict': self.model.state_dict(),
+                'feature_info': self.feature_info,
+                'embed_dim': self.embed_dim,
+                'num_heads': self.num_heads,
+                'num_layers': self.num_layers,
+                'dropout': self.dropout,
+                'is_trained': self.is_trained,
+                'normalization_means': self.normalization_means,
+                'normalization_stds': self.normalization_stds
+            }, filepath)
+            print(f"REAL TRANSFORMER MODEL saved to {filepath}")
+        else:
+            raise ValueError("No model to save")
+    
+    def load(self, filepath):
+        """Load model state dict with normalization parameters"""
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
+        
+        # Reconstruct feature info
+        self.feature_info = checkpoint['feature_info']
+        self.embed_dim = checkpoint['embed_dim']
+        self.num_heads = checkpoint['num_heads']
+        self.num_layers = checkpoint['num_layers']
+        self.dropout = checkpoint['dropout']
+        self.is_trained = checkpoint['is_trained']
+        
+        # Load normalization parameters
+        self.normalization_means = checkpoint['normalization_means']
+        self.normalization_stds = checkpoint['normalization_stds']
+        
+        # Reconstruct model
+        self.model = AdvancedTabularTransformer(
+            feature_info=self.feature_info,
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            num_layers=self.num_layers,
+            dropout=self.dropout,
+            num_classes=2
+        )
+        
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model = self.model.to(self.device)
+        print(f"REAL TRANSFORMER MODEL loaded from {filepath}")
 
 if __name__ == "__main__":
     main()

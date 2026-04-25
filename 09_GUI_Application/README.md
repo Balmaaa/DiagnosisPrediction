@@ -60,7 +60,7 @@ This is a comprehensive Graphical User Interface (GUI) application for pediatric
 
 1. **Run the GUI Application**
    ```bash
-   python appendicitis_gui.py
+   python prediction_gui.py
    ```
 
 2. **Alternative: Run Backend Test**
@@ -209,7 +209,7 @@ Based on the comprehensive evaluation:
 ### File Structure
 ```
 09_GUI_Application/
-├── appendicitis_gui.py          # Main GUI application
+├── prediction_gui.py            # Main GUI application (optimized)
 ├── backend_predictor.py         # Backend prediction logic
 ├── requirements.txt             # Python dependencies
 ├── README.md                    # This file
@@ -230,7 +230,7 @@ Based on the comprehensive evaluation:
 4. Test integration
 
 **Enhancing GUI:**
-1. Modify appendicitis_gui.py
+1. Modify prediction_gui.py
 2. Add new input fields as needed
 3. Update validation logic
 4. Test user experience

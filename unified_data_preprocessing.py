@@ -25,7 +25,16 @@ CATEGORICAL_FEATURES = [
     'Psoas_Sign', 'Neutrophilia', 'Ketones_in_Urine', 'RBC_in_Urine', 'WBC_in_Urine'
 ]
 
-ALL_FEATURES = NUMERICAL_FEATURES + CATEGORICAL_FEATURES
+# Laboratory features for missing indicators
+LABORATORY_FEATURES = [
+    'WBC_Count', 'RBC_Count', 'Hemoglobin', 'RDW', 'Segmented_Neutrophils',
+    'Thrombocyte_Count', 'CRP', 'Neutrophil_Percentage'
+]
+
+# Missing indicators for laboratory features
+LAB_MISSING_INDICATORS = [f"{lab}_missing" for lab in LABORATORY_FEATURES]
+
+ALL_FEATURES = NUMERICAL_FEATURES + CATEGORICAL_FEATURES + LAB_MISSING_INDICATORS
 
 def create_synthetic_dataset(n_samples=1000):
     """Create synthetic dataset for pediatric appendicitis prediction"""
@@ -85,6 +94,16 @@ def create_synthetic_dataset(n_samples=1000):
     probability = 1 / (1 + np.exp(-risk_score))
     data['Diagnosis'] = (probability > 0.5).astype(int)
     
+    # Add missing indicators for laboratory features (30% missing rate)
+    for lab in LABORATORY_FEATURES:
+        missing_mask = np.random.choice([0, 1], n_samples, p=[0.7, 0.3])  # 30% missing
+        data[f"{lab}_missing"] = missing_mask
+        
+        # For missing values, set to NaN (will be handled by imputation)
+        missing_indices = np.where(missing_mask == 1)[0]
+        if len(missing_indices) > 0:
+            data[lab][missing_indices] = np.nan
+    
     return pd.DataFrame(data)
 
 def prepare_unified_data(data_type='CSV'):
@@ -97,12 +116,17 @@ def prepare_unified_data(data_type='CSV'):
     X = df[ALL_FEATURES].copy()
     y = df['Diagnosis'].copy()
     
-    # Handle missing values
+    # Handle missing values properly for lab features
+    # Impute actual lab values when missing, but keep missing indicators
     numerical_imputer = SimpleImputer(strategy='median')
     categorical_imputer = SimpleImputer(strategy='most_frequent')
     
+    # Impute numerical features (including labs) - missing indicators remain unchanged
     X[NUMERICAL_FEATURES] = numerical_imputer.fit_transform(X[NUMERICAL_FEATURES])
     X[CATEGORICAL_FEATURES] = categorical_imputer.fit_transform(X[CATEGORICAL_FEATURES])
+    
+    # Missing indicators should remain as 0/1 (no imputation)
+    # They are already created in the synthetic dataset
     
     # Scale numerical features
     numerical_scaler = StandardScaler()
