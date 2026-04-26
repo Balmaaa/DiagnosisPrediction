@@ -290,10 +290,7 @@ class PredictionGUI:
         cb.pack(side=tk.LEFT, padx=10)
         if self.available_models: self.model_var.set(self.available_models[0])
 
-        self.lab_available_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(model_frame, text="Laboratory Results Available",
-                        variable=self.lab_available_var).pack(side=tk.LEFT, padx=20)
-
+        
         main = ttk.Frame(self.root)
         main.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=5)
         self.root.columnconfigure(0, weight=1); self.root.columnconfigure(1, weight=1)
@@ -335,7 +332,7 @@ class PredictionGUI:
         self.demo_vars = {}
         fields = [("Age (years):", "Age", 0, 0, "float"), ("Weight (kg):", "Weight", 0, 1, "float"),
                   ("Height (cm):", "Height", 1, 0, "float"), ("BMI:", "BMI", 1, 1, "float"),
-                  ("Sex:", "Sex", 2, 0, "sex"), ("Neutrophil %:", "Neutrophil_Percentage", 2, 1, "float")]
+                  ("Sex:", "Sex", 2, 0, "sex")]
         for lbl, name, r, c, ft in fields:
             ttk.Label(sf, text=lbl, font=('Arial', 11, 'bold')).grid(row=r, column=c*2, padx=12, pady=8, sticky=tk.W)
             if ft == "sex":
@@ -392,10 +389,11 @@ class PredictionGUI:
             ("Segmented Neutro (%):", "Segmented_Neutrophils", 2, 0, "float"),
             ("Thrombocyte (x10^9/L):", "Thrombocyte_Count", 2, 1, "float"),
             ("CRP (mg/L):", "CRP", 3, 0, "float"),
-            ("Neutrophilia:", "Neutrophilia", 3, 1, "yesno"),
-            ("Ketones in Urine:", "Ketones_in_Urine", 4, 0, "ketones"),
-            ("RBC in Urine:", "RBC_in_Urine", 4, 1, "yesno"),
-            ("WBC in Urine:", "WBC_in_Urine", 5, 0, "yesno")]
+            ("Neutrophil %:", "Neutrophil_Percentage", 3, 1, "float"),
+            ("Neutrophilia:", "Neutrophilia", 4, 0, "yesno"),
+            ("Ketones in Urine:", "Ketones_in_Urine", 4, 1, "ketones"),
+            ("RBC in Urine:", "RBC_in_Urine", 5, 0, "yesno"),
+            ("WBC in Urine:", "WBC_in_Urine", 5, 1, "yesno")]
         for lbl, name, r, c, ft in fields:
             ttk.Label(sf, text=lbl, font=('Arial', 11, 'bold')).grid(row=r, column=c*2, padx=12, pady=6, sticky=tk.W)
             if ft == "float":
@@ -490,28 +488,120 @@ Always exercise professional judgment.
                 self.predict_button.config(state="normal"); self.status_var.set("Ready"); return
 
             raw = self._collect_inputs()
+            
+            # Validate demographic data (cannot be zero)
+            demographic_errors = []
+            if raw.get('Age', 0) <= 0:
+                demographic_errors.append("Age must be greater than 0")
+            if raw.get('Weight', 0) <= 0:
+                demographic_errors.append("Weight must be greater than 0")
+            if raw.get('Height', 0) <= 0:
+                demographic_errors.append("Height must be greater than 0")
+            if raw.get('BMI', 0) <= 0:
+                demographic_errors.append("BMI must be greater than 0")
+            
+            if demographic_errors:
+                error_msg = "Please correct the following demographic errors:\n\n" + "\n".join(f"• {error}" for error in demographic_errors)
+                messagebox.showwarning("Invalid Demographic Data", error_msg)
+                self.predict_button.config(state="normal")
+                self.status_var.set("Ready")
+                return
+            
             enc = self._encode_inputs(raw)
-            lab_avail = self.lab_available_var.get()
-
-            if not lab_avail:
-                for lab in LAB_FIELDS:
-                    enc[lab] = 0.0
 
             features = self.preprocess_input(enc)
             result = self.predict(model_name, features)
+
+            # Format patient data for display
+            patient_data = []
+            
+            # Demographics
+            patient_data.append(f"Age: {raw.get('Age', 'N/A')} years")
+            patient_data.append(f"Sex: {'Male' if raw.get('Sex', 0) == 1 else 'Female'}")
+            patient_data.append(f"Weight: {raw.get('Weight', 'N/A')} kg")
+            patient_data.append(f"Height: {raw.get('Height', 'N/A')} cm")
+            patient_data.append(f"BMI: {raw.get('BMI', 'N/A')}")
+            patient_data.append(f"Body Temperature: {raw.get('Body_Temperature', 'N/A')}°C")
+            
+            # Clinical Symptoms
+            symptoms = []
+            symptom_list = [
+                ("Lower Right Abdominal Pain", "Lower_Right_Abd_Pain"),
+                ("Migratory Pain", "Migratory_Pain"),
+                ("Loss of Appetite", "Loss_of_Appetite"),
+                ("Nausea", "Nausea"),
+                ("Coughing Pain", "Coughing_Pain"),
+                ("Dysuria", "Dysuria"),
+                ("Peritonitis", "Peritonitis"),
+                ("Rebound Tenderness", "Ipsilateral_Rebound_Tenderness"),
+                ("Psoas Sign", "Psoas_Sign")
+            ]
+            
+            for display_name, field_name in symptom_list:
+                value = raw.get(field_name, 0)
+                status = "Present" if value == 1 else "Absent"
+                symptoms.append(f"{display_name}: {status}")
+            
+            severity_map = {0: 'uncomplicated', 1: 'complicated', 2: 'moderate'}
+            severity = severity_map.get(raw.get('Severity', 0), 'uncomplicated')
+            symptoms.append(f"Severity: {severity}")
+            
+            patient_data.append("\nClinical Symptoms:")
+            for symptom in symptoms:
+                patient_data.append(f"  • {symptom}")
+            
+            # Laboratory Results
+            lab_results = []
+            if raw.get('WBC_Count', 0) > 0: lab_results.append(f"WBC Count: {raw.get('WBC_Count')} K/μL")
+            if raw.get('RBC_Count', 0) > 0: lab_results.append(f"RBC Count: {raw.get('RBC_Count')} M/μL")
+            if raw.get('Hemoglobin', 0) > 0: lab_results.append(f"Hemoglobin: {raw.get('Hemoglobin')} g/dL")
+            if raw.get('RDW', 0) > 0: lab_results.append(f"RDW: {raw.get('RDW')}%")
+            if raw.get('Segmented_Neutrophils', 0) > 0: lab_results.append(f"Segmented Neutrophils: {raw.get('Segmented_Neutrophils')}%")
+            if raw.get('Thrombocyte_Count', 0) > 0: lab_results.append(f"Thrombocyte Count: {raw.get('Thrombocyte_Count')} K/μL")
+            if raw.get('CRP', 0) > 0: lab_results.append(f"CRP: {raw.get('CRP')} mg/L")
+            if raw.get('Neutrophil_Percentage', 0) > 0: lab_results.append(f"Neutrophil Percentage: {raw.get('Neutrophil_Percentage')}%")
+            if raw.get('Neutrophilia', 0) == 1: lab_results.append("Neutrophilia: Present")
+            
+            urine_results = []
+            if raw.get('Ketones_in_Urine', 0) == 1: urine_results.append("Ketones")
+            if raw.get('RBC_in_Urine', 0) == 1: urine_results.append("RBC")
+            if raw.get('WBC_in_Urine', 0) == 1: urine_results.append("WBC")
+            if urine_results:
+                lab_results.append(f"Urine: {', '.join(urine_results)}")
+            
+            if lab_results:
+                patient_data.append("\nLaboratory Results:")
+                for lab_result in lab_results:
+                    patient_data.append(f"  • {lab_result}")
+
+            # Safely extract prediction results
+            if isinstance(result, dict):
+                diagnosis = result.get('diagnosis', 'Unknown')
+                confidence = result.get('confidence', 0)
+                prob_appendicitis = result.get('prob_appendicitis', 0)
+                prob_no_appendicitis = result.get('prob_no_appendicitis', 0)
+            else:
+                diagnosis = str(result)
+                confidence = 0
+                prob_appendicitis = 0
+                prob_no_appendicitis = 0
 
             output = f"""
 PREDICTION RESULT
 ==================
 
+PATIENT DATA
+------------
+{chr(10).join(patient_data)}
+
+PREDICTION
+----------
 Model: {model_name}
-Diagnosis: {result['diagnosis']}
-Confidence: {result['confidence']:.1%}
+Diagnosis: {diagnosis}
+Confidence: {confidence:.1%}
 
-Appendicitis Probability: {result['prob_appendicitis']:.1%}
-No Appendicitis Probability: {result['prob_no_appendicitis']:.1%}
-
-Lab Data Available: {lab_avail}
+Appendicitis Probability: {prob_appendicitis:.1%}
+No Appendicitis Probability: {prob_no_appendicitis:.1%}
 
 ==================
 
@@ -524,7 +614,7 @@ medical judgment.
             self.results_text.delete(1.0, tk.END)
             self.results_text.insert(1.0, output)
             self.results_text.config(state='disabled')
-            self.status_var.set(f"Prediction complete - {result['diagnosis']} ({result['confidence']:.1%})")
+            self.status_var.set(f"Prediction complete using {model_name}")
 
         except Exception as e:
             messagebox.showerror("Prediction Error", f"An error occurred:\n{e}")
@@ -549,7 +639,6 @@ medical judgment.
         for name, var in self.lab_vars.items():
             if isinstance(var, tk.StringVar): var.set('no')
             else: var.set(0.0)
-        self.lab_available_var.set(True)
         self.results_text.config(state='normal')
         self.results_text.delete(1.0, tk.END)
         self.results_text.insert(1.0, "Form cleared. Enter new patient data and click Predict.")
