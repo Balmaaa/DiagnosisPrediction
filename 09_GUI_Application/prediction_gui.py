@@ -182,22 +182,42 @@ class PredictionGUI:
 
     def preprocess_input(self, input_data):
         fv = {}
+        available_labs = input_data.pop('_available_labs', [])
+        
+        # Process all features
         for feat in ALL_30_FEATURES:
-            val = input_data.get(feat)
-            if val is None or val == '':
-                fv[feat] = float(CLINICAL_DEFAULTS.get(feat, 0))
-            else:
+            if feat in available_labs:
+                # Lab feature is available - use the actual value
+                val = input_data.get(feat)
                 try: fv[feat] = float(val)
                 except: fv[feat] = 0.0
+            elif feat in LAB_FIELDS:
+                # Lab feature is not available - use neutral defaults (not medical defaults)
+                # This prevents artificial signals while maintaining model compatibility
+                fv[feat] = 0.0  # Neutral value that won't affect prediction
+            else:
+                # Non-lab feature - use the value or default
+                val = input_data.get(feat)
+                if val is None or val == '':
+                    fv[feat] = float(CLINICAL_DEFAULTS.get(feat, 0))
+                else:
+                    try: fv[feat] = float(val)
+                    except: fv[feat] = 0.0
 
         missing = {}
         for lab in LAB_FIELDS:
-            val = fv.get(lab, 0.0)
-            if lab in ZERO_MEANS_MISSING and val == 0.0:
-                missing[f"{lab}_missing"] = 1
+            if lab in available_labs:
+                # Lab is available - check if it's actually zero (missing) vs provided
+                val = fv.get(lab, 0.0)
+                if lab in ZERO_MEANS_MISSING and val == 0.0:
+                    missing[f"{lab}_missing"] = 1
+                else:
+                    missing[f"{lab}_missing"] = 0
                 fv[lab] = float(CLINICAL_DEFAULTS.get(lab, 0.0))
             else:
-                missing[f"{lab}_missing"] = 0
+                # Lab is not available - mark as missing
+                missing[f"{lab}_missing"] = 1
+                fv[lab] = 0.0  # Use neutral zero instead of medical default
 
         vec = [fv[f] for f in ALL_30_FEATURES] + [missing.get(m, 0) for m in LAB_MISSING_INDICATORS]
         return np.array([vec], dtype=np.float64)
@@ -452,15 +472,50 @@ Always exercise professional judgment.
                   font=('Arial', 11)).grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E))
 
     
+    def _is_lab_value_available(self, value):
+        """Check if lab value is available (not missing/zero)"""
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.lower().strip() not in ['', '0', 'no', 'absent']
+        if isinstance(value, (int, float)):
+            return value != 0
+        return True
+    
     def _collect_inputs(self):
         d = {}
-        for name, var in self.demo_vars.items(): d[name] = var.get()
-        for name, var in self.clinical_vars.items(): d[name] = var.get()
-        for name, var in self.lab_vars.items(): d[name] = var.get()
+        
+        # Collect demographics and clinical variables normally
+        for name, var in self.demo_vars.items(): 
+            d[name] = var.get()
+        for name, var in self.clinical_vars.items(): 
+            d[name] = var.get()
+        
+        # Handle lab variables - only include available ones
+        available_labs = {}
+        for name, var in self.lab_vars.items():
+            raw_value = var.get()
+            
+            if self._is_lab_value_available(raw_value):
+                # Only include lab values that are actually provided
+                # All lab values are treated as numerical except categorical yes/no
+                if isinstance(raw_value, str):
+                    # Categorical lab values (yes/no)
+                    available_labs[name] = raw_value
+                else:
+                    # Numerical lab values
+                    available_labs[name] = float(raw_value)
+        
+        # Add available labs to the input dictionary
+        d.update(available_labs)
+        d['_available_labs'] = list(available_labs.keys())  # Track which labs are available
+        
         return d
 
     def _encode_inputs(self, raw):
         enc = {}
+        available_labs = raw.pop('_available_labs', [])  # Remove tracking variable
+        
         for k, v in raw.items():
             if isinstance(v, str):
                 vl = v.lower().strip()
@@ -475,6 +530,9 @@ Always exercise professional judgment.
             else:
                 try: enc[k] = float(v)
                 except: enc[k] = 0.0
+        
+        # Store available labs for preprocessing
+        enc['_available_labs'] = available_labs
         return enc
 
     def on_predict(self):
@@ -538,12 +596,15 @@ Always exercise professional judgment.
             ]
             
             for display_name, field_name in symptom_list:
-                value = raw.get(field_name, 0)
-                status = "Present" if value == 1 else "Absent"
+                value = raw.get(field_name, "no")
+                # Show actual dropdown value (yes/no) with proper capitalization
+                if isinstance(value, str):
+                    status = value.capitalize()  # "yes" -> "Yes", "no" -> "No"
+                else:
+                    status = "Present" if value == 1 else "Absent"
                 symptoms.append(f"{display_name}: {status}")
             
-            severity_map = {0: 'uncomplicated', 1: 'complicated', 2: 'moderate'}
-            severity = severity_map.get(raw.get('Severity', 0), 'uncomplicated')
+            severity = raw.get('Severity', 'uncomplicated')
             symptoms.append(f"Severity: {severity}")
             
             patient_data.append("\nClinical Symptoms:")
