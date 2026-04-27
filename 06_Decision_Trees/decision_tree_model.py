@@ -151,10 +151,10 @@ class DecisionTreeModel:
         print(f"  - Score std: {mean_scores.std():.4f}")
         
         if mean_scores.std() < 0.01:
-            print(f"  ⚠️  WARNING: Low score variance - tuning may be ineffective")
-            print(f"  ⚠️  Suggests: Dataset bottleneck or parameter space too narrow")
+            print(f"  WARNING: Low score variance - tuning may be ineffective")
+            print(f"  WARNING: Suggests: Dataset bottleneck or parameter space too narrow")
         else:
-            print(f"  ✅ Score variance healthy - tuning is effective")
+            print(f"  OK: Score variance healthy - tuning is effective")
         print(f"{'='*60}\n")
         
         return self.model

@@ -6,19 +6,19 @@ This is a comprehensive Graphical User Interface (GUI) application for pediatric
 
 ## Features
 
-### 🤖 **AI Models Available**
+### **AI Models Available**
 - **Transformer Model** - Deep learning approach (main contribution)
 - **Decision Tree** - Traditional machine learning
 - **Gradient Boosting** - Ensemble method
 - **XGBoost** - Optimized gradient boosting
 
-### 📋 **Comprehensive Data Input**
+### **Comprehensive Data Input**
 - **Demographic Information**: Age, Weight, Height, BMI, Sex
 - **Clinical Symptoms**: Pain patterns, nausea, fever, physical examination findings
 - **Laboratory Results**: Blood counts, inflammatory markers, urine analysis
 - **Imaging Findings**: Ultrasound results, radiological findings
 
-### 🎯 **Key Features**
+### **Key Features**
 - Model selection interface
 - Real-time prediction
 - Confidence scores
@@ -109,13 +109,13 @@ This is a comprehensive Graphical User Interface (GUI) application for pediatric
 #### 4. **Results Interpretation**
 
 **Positive Prediction (Appendicitis):**
-- ⚠️ High risk detected
+- WARNING: High risk detected
 - Immediate medical evaluation recommended
 - Consider surgical consultation
 - Monitor for worsening symptoms
 
 **Negative Prediction (No Appendicitis):**
-- ✅ Low risk assessment
+- OK: Low risk assessment
 - Continue monitoring
 - Consider alternative diagnoses
 - Re-evaluate if symptoms worsen
@@ -133,13 +133,13 @@ Based on the comprehensive evaluation:
 
 ## Medical Guidelines
 
-### ⚠️ **Important Disclaimer**
+### **Important Disclaimer**
 - This system is for **medical reference only**
 - Clinical judgment should always prevail
 - Not a substitute for professional medical evaluation
 - Use as a decision support tool, not definitive diagnosis
 
-### 🏥 **Recommended Workflow**
+### **Recommended Workflow**
 1. Complete comprehensive patient assessment
 2. Use system as additional decision support
 3. Consider model confidence scores

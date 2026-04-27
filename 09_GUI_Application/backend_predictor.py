@@ -532,7 +532,7 @@ class AppendicitisPredictor:
                         self.models['Transformer'] = self._create_simple_transformer(X_train, y_train)
                 else:
                     print("[WARNING] PyTorch not available (TRANSFORMER_AVAILABLE=False)")
-                    print("⚠️ Using Gradient Boosting as fallback for Transformer")
+                    print("WARNING: Using Gradient Boosting as fallback for Transformer")
                     self.models['Transformer'] = self._create_simple_transformer(X_train, y_train)
             else:
                 print("\n[4/4] Transformer already loaded from .pkl, skipping training")
@@ -1282,20 +1282,20 @@ class AppendicitisPredictor:
                     accuracies = [v['accuracy'] for v in bias_results[model_name]['age_bias'].values()]
                     if max(accuracies) - min(accuracies) > 0.1:
                         bias_detected = True
-                        print(f"  ⚠️ AGE BIAS DETECTED: Accuracy range {max(accuracies) - min(accuracies):.3f}")
+                        print(f"  WARNING: AGE BIAS DETECTED: Accuracy range {max(accuracies) - min(accuracies):.3f}")
                 
                 # Sex bias check
                 if 'sex_bias' in bias_results[model_name]:
                     accuracies = [v['accuracy'] for v in bias_results[model_name]['sex_bias'].values()]
                     if max(accuracies) - min(accuracies) > 0.1:
                         bias_detected = True
-                        print(f"  ⚠️ SEX BIAS DETECTED: Accuracy range {max(accuracies) - min(accuracies):.3f}")
+                        print(f"  WARNING: SEX BIAS DETECTED: Accuracy range {max(accuracies) - min(accuracies):.3f}")
                 
                 if not bias_detected:
-                    print(f"  ✅ No significant bias detected")
+                    print(f"  OK: No significant bias detected")
                 
             except Exception as e:
-                print(f"  ❌ Error analyzing bias for {model_name}: {e}")
+                print(f"  ERROR: Error analyzing bias for {model_name}: {e}")
                 bias_results[model_name] = {'error': str(e)}
         
         return bias_results
